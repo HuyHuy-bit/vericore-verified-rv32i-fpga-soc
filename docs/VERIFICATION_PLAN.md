@@ -37,6 +37,8 @@ The RTL exposes an RVFI-style trace at WB (`rvfi_*` in `backend.sv`), simulation
 
 Both machines run the *same ELF*. Spike reserves low memory, so `compliance/link/spike-lockstep.ld` relocates to `0x80000000`; the RTL's memories decode only their low address bits, so that image aliases back to the same words, and only the reset vector needs adjusting (`RESET_PC`).
 
+Spike itself is pinned in CI to the exact commit these results were measured against, not tracked from `master`. A reference model that changes version underneath you makes every future divergence ambiguous between "the RTL regressed" and "upstream changed" — which is the single question this flow exists to answer unambiguously.
+
 **Catches:** the "right answer via the wrong path" class — wrong forwarding masked by a dead value, a flush that squashes one instruction too many, a stale CSR read nobody observes. This is what made the Phase 7 refactor safe to attempt.
 **Doesn't catch:** anything outside these 38 programs — though the same harness is now also driven by random stimulus, see below.
 
@@ -59,7 +61,9 @@ Each of the five remaining holes is annotated in `docs/coverage.md` with *why* i
 
 **`make soak`** — `tools/rand_gen.py` emits random ALU/load-store programs; `tools/rv32i_model.py` is a small Python reference model that computes the expected result. **1000 seeds pass clean** against both cacheless and cache-enabled builds. Compares final register state.
 
-**`make soak-lockstep`** — the same generator pointed at Spike instead (`--spike` mode, `tools/soak_lockstep.sh`). Because Spike is a full ISA implementation rather than a 90-line model, this flow *can* generate branches and jumps — ~13% of emitted instructions — and it compares **per retirement** rather than on final state. **100 seeds × 60 instructions pass clean.** Control flow under random stimulus was the single largest hole in this project's verification and this is what closes it.
+**`make soak-lockstep`** — the same generator pointed at Spike instead (`--spike` mode, `tools/soak_lockstep.sh`). Because Spike is a full ISA implementation rather than a 90-line model, this flow *can* generate branches and jumps — ~13% of emitted instructions — and it compares **per retirement** rather than on final state. **200 seeds × 60 instructions pass clean, in ~20 seconds**, and it runs in CI on every `rtl/**` push alongside the compliance lockstep. Control flow under random stimulus was the single largest hole in this project's verification and this is what closes it.
+
+The harness was validated by fault injection rather than assumed to work: changing `BLTU` in `branch_unit.sv` to compare signed instead of unsigned made **4 of 20 seeds diverge**, each pointing at the retirement where the wrong branch direction first showed up. A verification flow that has only ever reported success hasn't been shown to be capable of reporting anything else.
 
 Getting it working surfaced a non-obvious hazard worth recording: the two machines do not start from the same architectural state. Spike enters through a boot ROM at `0x1000` that leaves residue in `x5`/`a0`/`a1` before jumping to the program, while the RTL comes out of reset all-zero. Hand-written compliance tests never notice because they initialise their own registers; randomly generated code reads whatever is there and diverges for a reason that has nothing to do with the DUT. The generator now emits an explicit register-init prologue. The first divergence this flow ever reported was that, not an RTL bug — which is itself the point: a lockstep harness that has never reported a divergence hasn't been shown to be able to.
 

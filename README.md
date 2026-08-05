@@ -81,7 +81,7 @@ Three findings from the geometry sweeps (measured pre-BRAM-rework; the qualitati
 | CI matrix | Directed suite × 6 cache/latency configs per push; result must be invariant to cache config |
 | Assertions | 25 SVA properties, live in every build via `--assert` |
 | Functional coverage | 38 cover points, 33 hit (86.8%) — [`docs/coverage.md`](docs/coverage.md) |
-| Constrained-random | 1000 seeds vs. a Python model (ALU/load-store); **100 seeds vs. Spike** with branches/jumps, compared per-retirement |
+| Constrained-random | 1000 seeds vs. a Python model (ALU/load-store); **200 seeds vs. Spike** with branches/jumps, per-retirement, in CI |
 | Lint | `verilator -Wall` clean, waivers justified in [`rtl/verilator.vlt`](rtl/verilator.vlt) |
 
 See [`docs/VERIFICATION_PLAN.md`](docs/VERIFICATION_PLAN.md) for what each mechanism catches and what it explicitly doesn't.
@@ -96,7 +96,7 @@ make bench      # C kernels, CPI table
 make coverage   # functional coverage report
 make soak SEEDS=1000            # random programs vs. the Python model
 make lockstep                  # compliance suite vs. Spike, per retirement
-make soak-lockstep SEEDS=100   # random programs vs. Spike, with control flow
+make soak-lockstep SEEDS=200   # random programs vs. Spike, with control flow
 ```
 
 Cache geometry is a set of RTL parameters, so each configuration is its own build:
@@ -116,6 +116,7 @@ Synthesis scripts are in [`syn/`](syn/); see [`syn/build.tcl`](syn/build.tcl) fo
 - **Passing your own tests and being *correct* are different claims.** The compliance suite exists because directed tests, however careful, reflect the blind spots of whoever wrote them. Running against an external, independently-generated reference is what turns "I believe this works" into "this is verified."
 - **A test that ends by guessing isn't a test.** Runs used to stop when the PC stopped moving, which cannot tell "finished" from "spinning" or "stalled". Switching to a `tohost` store made termination deterministic — and immediately broke eight tests, because inserting those instructions shifted every trap handler they located by a hardcoded byte offset. The heuristic had been hiding how fragile the tests were.
 - **Simulation hides the cost of memory.** A combinational array read is free in Verilator and impossible in a Block RAM. Synthesis turned a "1.18 CPI" cache into a 2.3 CPI cache and a silent 3.2×-over-budget design into one that fits — neither fact was visible from any amount of simulation.
+- **A reference model has to be pinned, or a future divergence is unreadable.** CI builds Spike from a fixed commit, not `master`. Otherwise the next time lockstep fails you can't tell whether the RTL regressed or the reference moved — and that ambiguity destroys the exact property the comparison was built to provide.
 - **When a design is congestion-bound, the area fix *is* the timing fix.** Registering a 64-bit comparator on the reported critical path bought +0.45% fmax. Moving the I-cache array into Block RAM — done for area, not timing — bought +9.8%, because freeing 8,241 flip-flops relieved the routing pressure that was the real limit. Reading the constraint correctly mattered more than optimizing the thing the timing report named.
 - **An interrupt and a trap resume at different addresses, and that's easy to get backwards.** A trap re-runs the faulting instruction (`mepc = pc`); an interrupt lets the instruction in flight complete and resumes after it (`mepc = pc+4`). Swap them and every interrupt either duplicates or silently drops one instruction — invisible in any test that doesn't specifically check `mepc` against the *right* one of those two.
 - **A "critical path" name in a synthesis report isn't automatically the real one.** The first re-synthesis after adding interrupts pointed at a plausible-looking chain (a 64-bit timer comparator feeding the PC redirect mux); fixing it *did* measurably shrink that exact chain (logic delay ↓31%, carry-chain length halved) but moved fmax by only +0.45%, because a second, route-dominated path was waiting to take over. The fix was real and worth keeping; the lesson is that "the" bottleneck in a small, congested build is often several similarly-bad paths, not one.

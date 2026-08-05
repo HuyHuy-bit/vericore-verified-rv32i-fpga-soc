@@ -49,18 +49,30 @@ jobs:
 
       # Spike is a source build and slow to compile, so it's cached on its
       # commit-pinned tag rather than rebuilt every run.
+      # Pinned to the exact commit every lockstep result in this repo was
+      # measured against, rather than tracking master. A reference model that
+      # silently changes version is a reference model you can't reason about:
+      # a divergence would be ambiguous between "the RTL regressed" and
+      # "upstream changed", which is the one question this whole job exists
+      # to answer unambiguously. The cache key carries the SHA so re-pinning
+      # busts the cache automatically.
       - name: Cache Spike
         id: spike-cache
         uses: actions/cache@v4
         with:
           path: ~/.local/spike
-          key: spike-v1.1.1-dev
+          key: spike-55b4658dbf574ba0b714083ec436ce2cb5be1998
 
       - name: Build Spike
         if: steps.spike-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/riscv-software-src/riscv-isa-sim.git /tmp/spike-src
-          cd /tmp/spike-src && mkdir build && cd build
+          SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
+          mkdir -p /tmp/spike-src && cd /tmp/spike-src
+          git init -q
+          git remote add origin https://github.com/riscv-software-src/riscv-isa-sim.git
+          git fetch -q --depth 1 origin "$SPIKE_SHA"
+          git checkout -q FETCH_HEAD
+          mkdir build && cd build
           ../configure --prefix=$HOME/.local/spike
           make -j$(nproc) && make install
 
@@ -76,3 +88,12 @@ jobs:
           test -x "$SPIKE" || { echo "spike missing at $SPIKE"; exit 1; }
           "$SPIKE" --help >/dev/null 2>&1 || true
           make lockstep
+
+      # The compliance programs above are fixed; these are generated fresh and
+      # contain branches and jumps, which the Python-model soak cannot produce.
+      # ~20 s for 200 seeds, so there's no reason to run fewer in CI than
+      # locally. Reuses the obj_dir_lockstep build the previous step made.
+      - name: Random programs against Spike (with control flow)
+        env:
+          SPIKE: /home/runner/.local/spike/bin/spike
+        run: make soak-lockstep SEEDS=200
