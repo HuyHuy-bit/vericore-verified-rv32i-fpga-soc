@@ -31,10 +31,12 @@ Out-of-context synth → place → route, Vivado 2025.2, target `xc7a35ticsg324-
 |---|---|---|---|---|
 | core only | 75.3 MHz | 3,990 (19%) | 4,966 (12%) | 0 |
 | + 1KB I$ (4-way) | 76.1 MHz | 5,029 (24%) | 6,942 (17%) | 4 × RAMB18 |
-| + 4KB D$ write-through † | 76.2 MHz | 14,237 (68%) | 21,545 (52%) | 4 × RAMB18 |
-| + 4KB D$ write-back † | 75.8 MHz | 14,850 (71%) | 21,500 (52%) | 4 × RAMB18 |
+| + 4KB D$ write-through | 71.6 MHz | 8,306 (40%) | 13,461 (32%) | 8 × RAMB18 |
+| + 4KB D$ write-back | 73.5 MHz | 9,256 (45%) | 13,491 (32%) | 8 × RAMB18 |
 
-† The two D-cache rows predate both the current RTL and the I-cache rework below, and their I-cache is still the flip-flop version — so they overstate LUT/FF for the design as it stands. The first two rows are freshly measured.
+All four rows are measured on the same current RTL, so they compare to each other. Two things they show that the earlier (pre-interrupt, pre-BRAM-I-cache) numbers didn't: the full hierarchy now fits in **45% of the device instead of 71%**, because the Block RAM rework applies to both caches rather than just the D-cache; and write-back's cost over write-through is **+950 LUT for the dirty-bit and writeback-FSM logic**, with essentially identical flip-flop count — a concrete area price to set against the CPI wins in the Performance table below.
+
+The fmax figures are *lower* than earlier revisions of this table reported (the D-cache rows previously read ~76 MHz). That is not a regression from the Block RAM work — that change measurably *improved* fmax by 9.8%, see below. It is the accumulated cost of everything added since those numbers were taken: interrupts, the return-address stack, and the gshare predictor. The core-only row shows the same effect in isolation, 79.2 → 75.3 MHz.
 
 Getting the D-cache to fit took four RTL revisions, and the intermediate results were the lesson: a registered read alone changed nothing (316% → 315% LUT); splitting the `[WAYS][SETS][BLOCK_WORDS]` array into per-way flat arrays did the real work (→ 82%); and `ram_style="block"` was *refused* until the two write addresses in one `always_ff` were muxed into one — a BRAM port has a single address input. Full progression in [`docs/MICROARCHITECTURE.md`](docs/MICROARCHITECTURE.md#synthesis).
 

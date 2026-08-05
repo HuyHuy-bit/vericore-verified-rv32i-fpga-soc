@@ -123,9 +123,16 @@ Out-of-context synthesis and implementation (synth → opt → place → route) 
 | Config | Result | fmax | LUT | FF | BRAM |
 |---|---|---|---|---|---|
 | core only (no caches) | Routed | 74.97 MHz | 3,990 / 20,800 (19%) | 4,966 / 41,600 (12%) | 0 / 50 |
-| + 1KB I-cache (4-way) | Routed | ~77 MHz | 10,530 / 20,800 (51%) | 14,891 / 41,600 (36%) | 0 / 50 |
-| + 4KB D-cache, write-through | Routed | 76.2 MHz | 14,237 / 20,800 (68%) | 21,545 / 41,600 (52%) | 4 × RAMB18 |
-| + 4KB D-cache, write-back | Routed | 75.8 MHz | 14,850 / 20,800 (71%) | 21,500 / 41,600 (52%) | 4 × RAMB18 |
+| + 1KB I-cache (4-way) | Routed | 76.1 MHz | 5,029 / 20,800 (24%) | 6,942 / 41,600 (17%) | 4 × RAMB18 |
+| + 4KB D-cache, write-through | Routed | 71.6 MHz | 8,306 / 20,800 (40%) | 13,461 / 41,600 (32%) | 8 × RAMB18 |
+| + 4KB D-cache, write-back | Routed | 73.5 MHz | 9,256 / 20,800 (45%) | 13,491 / 41,600 (32%) | 8 × RAMB18 |
+
+All four rows are measured against the same current RTL, so they are comparable to each other. Two results only visible once the whole table was re-measured together:
+
+- **The full hierarchy now fits in 45% of the device rather than 71%**, because the Block RAM pattern applies to both caches. The earlier table's D-cache rows carried a flip-flop I-cache alongside a BRAM D-cache, which is what made them look near-full.
+- **Write-back costs +950 LUT over write-through** (9,256 vs 8,306) for the dirty bits and the extra FSM states, at essentially identical flip-flop count. That is the area price to set against the CPI wins in the README's Performance table — where write-back is not a uniform improvement either.
+
+The fmax numbers are lower than earlier revisions of this table reported, and the cause is worth stating precisely so it isn't misread as a Block RAM regression: the Block RAM rework *raised* fmax (see below, +9.8% measured against a control). The decline is the accumulated logic added since those older numbers — interrupts, the return-address stack, the gshare predictor — and it shows up identically in the core-only row, 79.2 → 75.0 MHz, which has no caches at all.
 
 The core-only row is a fresh re-measurement, taken after interrupts/`mstatus`/XLEN landed; the three cache rows predate that work and haven't been re-synthesized against the current RTL, so treat them as the last known-good numbers for the cache hierarchy specifically, not as directly comparable to the core-only row above. (The core-only figure also dropped from the ~79 MHz an earlier revision reported, for the mechanistic reason below — interrupt support added real combinational logic to what's now the worst path.)
 
