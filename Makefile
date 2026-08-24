@@ -41,7 +41,7 @@ ASM      = python3 tools/asm.py
 TESTS    = t01_rtype t02_itype t03_memory t04_branch t05_jump t06_lui_auipc t07_load_use t08_loop t09_trap_illegal t10_misaligned t11_mret t12_misaligned_fetch t13_csr_ext t14_csr_illegal t15_csr_unimpl t16_irq_timer t17_irq_mret t18_trap_causes t19_dcache_evict t20_ras_multi_caller t21_gshare_correlated t22_fencei
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim
+.PHONY: all sim assemble test harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -73,7 +73,7 @@ test: sim assemble memtiming
 	    CYCS=$$(grep '^cycles=' tests/$$t.ref 2>/dev/null | cut -d= -f2); \
 	    CYCS=$${CYCS:-25}; \
 	    if ./$(SIM) +MEMFILE=tests/$$t.hex +REFFILE=tests/$$t.ref \
-	               +CYCLES=$$CYCS +VCD=tests/$$t.vcd; then \
+	               +STOP=tohost +CYCLES=$$CYCS +VCD=tests/$$t.vcd; then \
 	        PASS=$$((PASS+1)); \
 	    else \
 	        FAIL=$$((FAIL+1)); \
@@ -82,6 +82,12 @@ test: sim assemble memtiming
 	echo ""; \
 	echo "========== $$PASS/$$((PASS+FAIL)) tests passed =========="; \
 	[ $$FAIL -eq 0 ]
+
+# Dependency-free black-box checks for simulator argument, completion, and
+# result-consumer contracts.  The target builds the simulator first because
+# the fixtures invoke the real binary.
+harness-test: sim
+	python3 tools/test_harness.py
 
 # Run the C benchmark kernels and print the CPI table.
 bench: sim
