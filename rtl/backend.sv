@@ -720,15 +720,24 @@ ex_mem_t ex_mem_d, ex_mem_q;
     logic cov_en; assign cov_en = !rst;
 
     // forward_a x forward_b (9 crosses)
-    genvar gi, gj;
-    generate
-        for (gi = 0; gi < 3; gi++) begin : g_fwd_a
-            for (gj = 0; gj < 3; gj++) begin : g_fwd_b
-                cover property (@(posedge clk) disable iff (rst)
-                    cov_en && forward_a == gi[1:0] && forward_b == gj[1:0]);
-            end
-        end
-    endgenerate
+    c_fwd_a0_b0: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b00 && forward_b == 2'b00);
+    c_fwd_a0_b1: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b00 && forward_b == 2'b01);
+    c_fwd_a0_b2: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b00 && forward_b == 2'b10);
+    c_fwd_a1_b0: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b01 && forward_b == 2'b00);
+    c_fwd_a1_b1: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b01 && forward_b == 2'b01);
+    c_fwd_a1_b2: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b01 && forward_b == 2'b10);
+    c_fwd_a2_b0: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b10 && forward_b == 2'b00);
+    c_fwd_a2_b1: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b10 && forward_b == 2'b01);
+    c_fwd_a2_b2: cover property (@(posedge clk) disable iff (rst)
+        cov_en && forward_a == 2'b10 && forward_b == 2'b10);
 
     // predictor outcome: predicted_taken x actual_taken x target_match, only
     // meaningful for an actual control-flow instruction in EX
