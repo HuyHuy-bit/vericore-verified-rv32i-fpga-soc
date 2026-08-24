@@ -256,6 +256,7 @@ package rv32i_pkg;
         logic [XLEN-1:0] pc;
         logic            exc_pending;
         logic [XLEN-1:0] exc_cause;
+        logic [XLEN-1:0] exc_tval;
         logic        is_csr, is_system, is_fencei;
         logic [11:0] csr_addr;
         logic [2:0]  csr_funct3;

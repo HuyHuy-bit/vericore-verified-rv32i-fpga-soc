@@ -12,5 +12,6 @@ handler:
     addi  x5, x0, 1        # reached handler
     csrrs x6, mcause, x0   # x6 = mcause (should be 6 = store misaligned)
     csrrs x7, mepc,   x0   # x7 = mepc (faulting PC)
+    csrrs x8, mtval,  x0   # x8 = exact faulting effective address (2)
     tohost          # signal completion (exit code 1 = pass)
     halt

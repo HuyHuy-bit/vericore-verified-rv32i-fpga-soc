@@ -286,18 +286,20 @@ module backend #(
     assign csr_access_illegal = !csr_implemented(id_ex_q.csr_addr)
                                || (csr_attempts_write && csr_read_only(id_ex_q.csr_addr));
 
-    // ---- EX-stage exception detection (Part 1: illegal instruction) ----
+    // ---- EX-stage exception detection and payload selection ----
     // Detected here, but not acted on until the commit point in MEM, so that
     // exceptions resolve in program order (precise). Part 2 adds misaligned
     // load/store here as well.
     logic        exc_pending_ex;
-    logic [XLEN-1:0] exc_cause_ex;
+    logic [XLEN-1:0] exc_cause_ex, exc_tval_ex;
     always_comb begin
         exc_pending_ex = 1'b0;
         exc_cause_ex   = XLEN'(0);
+        exc_tval_ex    = XLEN'(0);
         if (id_ex_q.valid && id_ex_q.ctrl.illegal) begin
             exc_pending_ex = 1'b1;
             exc_cause_ex   = CAUSE_ILLEGAL_INSTR;
+            exc_tval_ex    = id_ex_q.instr;
         end else if (id_ex_q.valid && id_ex_q.ctrl.is_csr && csr_access_illegal) begin
             // Either the address isn't implemented at all, or it's a
             // structurally read-only CSR ([11:10]==11) and this access
@@ -305,24 +307,26 @@ module backend #(
             // only when the rs1/uimm operand is nonzero).
             exc_pending_ex = 1'b1;
             exc_cause_ex   = CAUSE_ILLEGAL_INSTR;
-        end else if (id_ex_q.valid && is_cf_instr && actual_taken && actual_target[1]
-                     && (id_ex_q.ctrl.pc_src == PC_SRC_BRANCH || id_ex_q.ctrl.pc_src == PC_SRC_JAL)) begin
-            // Without the C extension, a taken branch or JAL must land on a
-            // 4-byte boundary. JALR already masks bit 0 of its target (see
-            // its assign above) and is out of scope here, matching the plan.
+            exc_tval_ex    = id_ex_q.instr;
+        end else if (id_ex_q.valid && is_cf_instr && actual_taken && actual_target[1]) begin
+            // IALIGN=32 applies to every taken control-flow instruction.
+            // JALR's actual_target has already had bit 0 cleared above.
             exc_pending_ex = 1'b1;
             exc_cause_ex   = CAUSE_MISALIGNED_FETCH;
+            exc_tval_ex    = actual_target;
         end else if (id_ex_q.valid && id_ex_q.ctrl.mem_read) begin
             if ((id_ex_q.funct3[1:0] == 2'b10 && alu_result_ex[1:0] != 2'b00) ||
                 (id_ex_q.funct3[1:0] == 2'b01 && alu_result_ex[0]   != 1'b0)) begin
                 exc_pending_ex = 1'b1;
                 exc_cause_ex   = CAUSE_MISALIGNED_LOAD;
+                exc_tval_ex    = alu_result_ex;
             end
         end else if (id_ex_q.valid && id_ex_q.ctrl.mem_write) begin
             if ((id_ex_q.funct3[1:0] == 2'b10 && alu_result_ex[1:0] != 2'b00) ||
                 (id_ex_q.funct3[1:0] == 2'b01 && alu_result_ex[0]   != 1'b0)) begin
                 exc_pending_ex = 1'b1;
                 exc_cause_ex   = CAUSE_MISALIGNED_STORE;
+                exc_tval_ex    = alu_result_ex;
             end
         end
     end
@@ -351,6 +355,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
         ex_mem_d.pc           = id_ex_q.pc;
         ex_mem_d.exc_pending  = exc_pending_ex;
         ex_mem_d.exc_cause    = exc_cause_ex;
+        ex_mem_d.exc_tval     = exc_tval_ex;
         ex_mem_d.is_csr       = id_ex_q.ctrl.is_csr;
         ex_mem_d.is_system    = id_ex_q.ctrl.is_system;
         ex_mem_d.is_fencei    = id_ex_q.ctrl.is_fencei;
@@ -470,17 +475,9 @@ ex_mem_t ex_mem_d, ex_mem_q;
         // frozen PC.
         if (ex_mem_q.valid && !pipe_stall) begin
             if (ex_mem_q.exc_pending) begin
-                trap_take    = 1'b1;               // illegal instruction (Part 1)
+                trap_take    = 1'b1;
                 trap_cause_w = ex_mem_q.exc_cause;
-                // mtval: faulting address for a misaligned access, the
-                // offending word for illegal instruction (including an
-                // illegal CSR access), 0 for misaligned-fetch (the target
-                // isn't carried this far — spec permits mtval reading 0).
-                case (ex_mem_q.exc_cause)
-                    CAUSE_ILLEGAL_INSTR:                       trap_val_w = XLEN'(ex_mem_q.instr);
-                    CAUSE_MISALIGNED_LOAD, CAUSE_MISALIGNED_STORE: trap_val_w = ex_mem_q.alu_result;
-                    default: trap_val_w = XLEN'(0);
-                endcase
+                trap_val_w   = ex_mem_q.exc_tval;
             end else if (is_ecall_mem) begin
                 trap_take    = 1'b1;
                 trap_cause_w = CAUSE_ECALL_M;
