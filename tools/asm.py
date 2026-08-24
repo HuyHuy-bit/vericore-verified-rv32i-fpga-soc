@@ -124,7 +124,8 @@ def assemble(src):
         elif op=='mret':   words.append(0x30200073)
         elif op=='fence':  words.append(0x0FF0000F)  # fence iorw,iorw
         elif op in ('fence.i','fencei'): words.append(0x0000100F)
-        elif op=='word':   words.append(int(p[1],0) & 0xFFFFFFFF)   # raw 32-bit word
+        elif op in ('word','.word'):
+            words.append(int(p[1],0) & 0xFFFFFFFF)   # raw 32-bit word
         elif op in ('csrrw','csrrs','csrrc'):
             f3={'csrrw':1,'csrrs':2,'csrrc':3}[op]
             words.append((CSR_NUM(p[2])<<20)|(r(p[3])<<15)|(f3<<12)|(r(p[1])<<7)|0x73)

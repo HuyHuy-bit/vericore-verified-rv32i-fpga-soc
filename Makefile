@@ -38,7 +38,12 @@ endif
 SIM      = $(OBJDIR)/V$(TOP)
 ASM      = python3 tools/asm.py
 
-TESTS    = t01_rtype t02_itype t03_memory t04_branch t05_jump t06_lui_auipc t07_load_use t08_loop t09_trap_illegal t10_misaligned t11_mret t12_misaligned_fetch t13_csr_ext t14_csr_illegal t15_csr_unimpl t16_irq_timer t17_irq_mret t18_trap_causes t19_dcache_evict t20_ras_multi_caller t21_gshare_correlated t22_fencei t24_misaligned_control_flow
+TESTS    = t01_rtype t02_itype t03_memory t04_branch t05_jump t06_lui_auipc t07_load_use t08_loop t09_trap_illegal t10_misaligned t11_mret t12_misaligned_fetch t13_csr_ext t14_csr_illegal t15_csr_unimpl t16_irq_timer t17_irq_mret t18_trap_causes t19_dcache_evict t20_ras_multi_caller t21_gshare_correlated t22_fencei t23_decode_illegal t24_misaligned_control_flow t25_operand_use_hazards
+ifneq ($(origin TESTS),command line)
+ifneq ($(words $(TESTS)),25)
+$(error directed TESTS must contain exactly 25 programs)
+endif
+endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
 .PHONY: all sim assemble test unit harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
