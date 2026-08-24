@@ -7,12 +7,18 @@ They intentionally exercise the simulator CLI rather than its implementation.
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SIM = Path(os.environ.get("SIM", ROOT / "obj_dir" / "Vcpu"))
+REFERENCE_VERSIONS = dict(
+    line.split("=", 1)
+    for line in (ROOT / "tools/reference_versions.env").read_text().splitlines()
+    if line and not line.startswith("#")
+)
 
 TOHOST_PASS = "00100f93\n00010f37\nff0f0f13\n01ff2023\n0000006f\n"
 TOHOST_FAIL = "00200f93\n00010f37\nff0f0f13\n01ff2023\n0000006f\n"
@@ -255,6 +261,166 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("SNAPSHOT DEBUG RUN (non-verifying)", result.stdout)
         self.assertNotIn("PASS", result.stdout)
+
+
+class ComplianceRunnerTest(unittest.TestCase):
+    """Exercise the compliance runner with a one-case, fake toolchain."""
+
+    PINNED_ARCH_SHA = REFERENCE_VERSIONS["ARCH_TEST_SHA"]
+    PINNED_SPIKE_SHA = REFERENCE_VERSIONS["SPIKE_SHA"]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-compliance-fixture-")
+        self.work = Path(self.tmp.name)
+        self.arch = self.work / "riscv-arch-test"
+        self.src_dir = self.arch / "riscv-test-suite/rv32i_m/I/src"
+        self.ref_dir = self.arch / "riscv-test-suite/rv32i_m/I/references"
+        self.src_dir.mkdir(parents=True)
+        self.ref_dir.mkdir(parents=True)
+        (self.arch / "riscv-test-env/p").mkdir(parents=True)
+        self.src = self.src_dir / "case.S"
+        self.src.write_text("nop\n")
+        self.ref = self.ref_dir / "case.reference_output"
+        self.ref.write_text("00000000\n")
+        self.versions = self.work / "reference_versions.env"
+        self.write_versions()
+
+        self.bin_dir = self.work / "bin"
+        self.bin_dir.mkdir()
+        self.sim = self.bin_dir / "fake-sim"
+        self.write_tools()
+        self.env = os.environ.copy()
+        self.env.update({
+            "ARCH_TEST": str(self.arch),
+            "REPO_ROOT": str(ROOT),
+            "REFERENCE_VERSIONS": str(self.versions),
+            "SIM": str(self.sim),
+            "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
+            "REAL_PYTHON": sys.executable,
+            "FAKE_GIT_SHA": self.PINNED_ARCH_SHA,
+            "FAKE_SIGNATURE": "00000000\n",
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, path, contents):
+        path.write_text(contents)
+        path.chmod(0o755)
+
+    def write_versions(self, contents=None):
+        self.versions.write_text(contents or (
+            f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
+            "ARCH_TEST_EXPECTED_CASES=1\n"
+            f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
+        ))
+
+    def write_tools(self):
+        self.write(self.bin_dir / "riscv64-unknown-elf-gcc", """#!/usr/bin/env bash
+set -eu
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = -o ]; then touch "$2"; exit 0; fi
+    shift
+done
+exit 2
+""")
+        self.write(self.bin_dir / "riscv64-unknown-elf-nm", """#!/usr/bin/env bash
+if [ "${FAKE_NM_MODE:-ok}" = crash ]; then exit 7; fi
+printf '%s\\n' '00000000 T begin_signature' '00000004 T end_signature'
+""")
+        self.write(self.bin_dir / "python3", """#!/usr/bin/env bash
+set -eu
+if [ "${1##*/}" = elf2hex.py ]; then
+    printf '00000013\\n' > "$3"
+    : > "$4"
+    exit "${FAKE_ELF2HEX_RC:-0}"
+fi
+exec "$REAL_PYTHON" "$@"
+""")
+        self.write(self.bin_dir / "git", """#!/usr/bin/env bash
+set -eu
+printf '%s\\n' "$FAKE_GIT_SHA"
+""")
+        self.write(self.bin_dir / "diff", """#!/usr/bin/env bash
+if [ "${FAKE_DIFF_MODE:-ok}" = crash ]; then exit 2; fi
+exec /usr/bin/diff "$@"
+""")
+        self.write(self.sim, """#!/usr/bin/env bash
+set -eu
+sig=
+for arg in "$@"; do
+    case "$arg" in +SIGFILE=*) sig="${arg#'+SIGFILE='}" ;; esac
+done
+if [ "${FAKE_SIM_MODE:-ok}" = crash ]; then
+    [ -z "$sig" ] || printf 'stale\\n' > "$sig"
+    exit 7
+fi
+[ -z "$sig" ] || printf '%s' "$FAKE_SIGNATURE" > "$sig"
+""")
+
+    def run_runner(self):
+        return subprocess.run(
+            [str(ROOT / "compliance/run_compliance.sh")], cwd=ROOT, env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
+        )
+
+    def assert_runner_failure(self, diagnostic):
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stdout + result.stderr)
+
+    # Each test names a preflight or case-result branch that a permissive
+    # runner would turn into a zero-status compliance result.
+    def test_compliance_rejects_missing_version_metadata(self):
+        self.env["REFERENCE_VERSIONS"] = str(self.work / "missing.env")
+        self.assert_runner_failure("error: reference version file missing")
+
+    def test_compliance_rejects_malformed_version_metadata(self):
+        self.write_versions("ARCH_TEST_SHA=not-a-sha\n")
+        self.assert_runner_failure("error: malformed reference version metadata")
+
+    def test_compliance_rejects_duplicate_version_metadata(self):
+        self.write_versions(
+            f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
+            f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
+            "ARCH_TEST_EXPECTED_CASES=1\n"
+            f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
+        )
+        self.assert_runner_failure("error: duplicate reference version key: ARCH_TEST_SHA")
+
+    def test_compliance_rejects_simulator_crash_with_stale_signature(self):
+        self.env["FAKE_SIM_MODE"] = "crash"
+        self.assert_runner_failure("FAIL  case (simulation error")
+
+    def test_compliance_rejects_missing_reference(self):
+        self.ref.unlink()
+        self.assert_runner_failure("FAIL  case (missing reference")
+
+    def test_compliance_rejects_mismatched_signature(self):
+        self.env["FAKE_SIGNATURE"] = "ffffffff\n"
+        self.assert_runner_failure("FAIL  case (signature mismatch)")
+
+    def test_compliance_rejects_signature_symbol_lookup_failure(self):
+        self.env["FAKE_NM_MODE"] = "crash"
+        self.assert_runner_failure("FAIL  case (signature symbol lookup error")
+
+    def test_compliance_rejects_signature_comparison_error(self):
+        self.env["FAKE_DIFF_MODE"] = "crash"
+        self.assert_runner_failure("FAIL  case (signature comparison error")
+
+    def test_compliance_rejects_zero_discovery(self):
+        self.src.unlink()
+        self.assert_runner_failure("error: no compliance sources discovered")
+
+    def test_compliance_rejects_wrong_architecture_checkout(self):
+        self.env["FAKE_GIT_SHA"] = "0000000000000000000000000000000000000000"
+        self.assert_runner_failure("error: architecture test checkout SHA mismatch")
+
+    def test_compliance_accepts_a_fresh_matching_signature(self):
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("discovered=1 passed=1 failed=0 skipped/missing=0",
+                      result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

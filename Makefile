@@ -41,7 +41,7 @@ ASM      = python3 tools/asm.py
 TESTS    = t01_rtype t02_itype t03_memory t04_branch t05_jump t06_lui_auipc t07_load_use t08_loop t09_trap_illegal t10_misaligned t11_mret t12_misaligned_fetch t13_csr_ext t14_csr_illegal t15_csr_unimpl t16_irq_timer t17_irq_mret t18_trap_causes t19_dcache_evict t20_ras_multi_caller t21_gshare_correlated t22_fencei
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim
+.PHONY: all sim assemble test harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -101,7 +101,7 @@ lint:
 TEST ?= t01_rtype
 wave: sim assemble
 	./$(SIM) +MEMFILE=tests/$(TEST).hex +REFFILE=tests/$(TEST).ref \
-	         +CYCLES=$$(grep '^cycles=' tests/$(TEST).ref | cut -d= -f2) \
+	         +STOP=tohost +CYCLES=$$(grep '^cycles=' tests/$(TEST).ref | cut -d= -f2) \
 	         +VCD=tests/$(TEST).vcd
 	gtkwave tests/$(TEST).vcd &
 
@@ -119,7 +119,7 @@ coverage: assemble
 	@for t in $(TESTS); do \
 	    CYCS=$$(grep '^cycles=' tests/$$t.ref 2>/dev/null | cut -d= -f2); CYCS=$${CYCS:-25}; \
 	    ./$(COVDIR)/V$(TOP) +MEMFILE=tests/$$t.hex +REFFILE=tests/$$t.ref \
-	        +CYCLES=$$CYCS +VCD= +COVERAGE=coverage/$$t.dat > /dev/null; \
+	        +STOP=tohost +CYCLES=$$CYCS +VCD= +COVERAGE=coverage/$$t.dat > /dev/null; \
 	done
 	verilator_coverage --write coverage/merged.dat coverage/*.dat
 	verilator_coverage --annotate coverage/annotated coverage/merged.dat
@@ -142,6 +142,10 @@ lockstep: lockstep-sim
 SEEDS ?= 100
 soak: sim
 	./tools/soak.sh $(SEEDS)
+
+# Pinned RV32I architecture-test signature suite.
+compliance: sim
+	./compliance/run_compliance.sh
 
 # Random programs compared against Spike instead of the Python model, which
 # is what lets them contain branches and jumps (see tools/soak_lockstep.sh).

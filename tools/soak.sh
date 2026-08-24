@@ -25,7 +25,7 @@ for seed in $(seq 1 "$SEEDS"); do
     python3 "$ROOT/tools/rand_gen.py" -n "$INSTRS" --seed "$seed" "$hexf" "$reff" 2>/dev/null
     cycles=$(grep '^cycles=' "$reff" | cut -d= -f2)
 
-    if "$SIM" +MEMFILE="$hexf" +REFFILE="$reff" +CYCLES="$cycles" +VCD= > "$WORK/s$seed.log" 2>&1; then
+    if "$SIM" +MEMFILE="$hexf" +REFFILE="$reff" +STOP=selfloop +CYCLES="$cycles" +VCD= > "$WORK/s$seed.log" 2>&1; then
         PASS=$((PASS+1))
     else
         FAIL=$((FAIL+1))

@@ -109,7 +109,7 @@ for k in "${KERNELS[@]}"; do
     echo "x10=$expected" > "$WORK/$k.ref"
 
     "$SIM" +MEMFILE="$WORK/$k.instr.hex" +DATAFILE="$WORK/$k.data.hex" \
-           +REFFILE="$WORK/$k.ref" +CYCLES=$CYCLES +VCD= > "$WORK/$k.run.log" 2>&1
+           +REFFILE="$WORK/$k.ref" +STOP=selfloop +CYCLES=$CYCLES +VCD= > "$WORK/$k.run.log" 2>&1
     rc=$?
 
     perf=$(grep -m1 'perf: cycles=' "$WORK/$k.run.log")
