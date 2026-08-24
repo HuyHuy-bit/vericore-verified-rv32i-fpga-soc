@@ -10,8 +10,12 @@
     addi  x11, x0, 88       # nonzero: EBREAK handler must explicitly record 0
     addi  x12, x0, 99       # nonzero: load handler must record exact addr 1
     addi  x8, x0, 1         # identify the ECALL handler visit
+    addi  x16, x0, 51
+    csrrw x0, mtval, x16    # stale mtval is nonzero immediately before ECALL
     ecall                   # cause 11
     addi  x8, x0, 2         # identify the EBREAK handler visit
+    addi  x16, x0, 62
+    csrrw x0, mtval, x16    # distinct stale mtval immediately before EBREAK
     ebreak                  # cause 3
     addi  x8, x0, 3         # identify the misaligned-load handler visit
     lh    x4, 1(x0)         # addr 1 is odd -> misaligned load -> cause 4
