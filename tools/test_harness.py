@@ -281,9 +281,13 @@ class CoverageTargetTest(unittest.TestCase):
         (self.repo / "docs").mkdir()
         self.bin_dir = self.work / "bin"
         self.bin_dir.mkdir()
+        self.merge_marker = self.work / "verilator-coverage-invoked"
         self.write_fake_tools()
         self.env = os.environ.copy()
-        self.env["PATH"] = str(self.bin_dir) + os.pathsep + self.env["PATH"]
+        self.env.update({
+            "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
+            "FAKE_COVERAGE_MERGE_MARKER": str(self.merge_marker),
+        })
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -313,7 +317,9 @@ sys.exit(0)
 """)
         self.write_executable("verilator_coverage", f"""#!{sys.executable}
 from pathlib import Path
+import os
 import sys
+Path(os.environ["FAKE_COVERAGE_MERGE_MARKER"]).write_text("invoked\\n")
 if sys.argv[1] == "--write":
     Path(sys.argv[2]).write_text("")
 elif sys.argv[1] == "--annotate":
@@ -325,7 +331,10 @@ elif sys.argv[1] == "--annotate":
             ["make", "coverage"], cwd=self.repo, env=self.env,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
         )
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertIn("coverage simulation failed: t01_rtype", combined)
+        self.assertFalse(self.merge_marker.exists(), combined)
 
 
 class SoakTargetTest(unittest.TestCase):
@@ -345,7 +354,10 @@ class SoakTargetTest(unittest.TestCase):
         self.sim.chmod(0o755)
         self.bin_dir = self.work / "bin"
         self.bin_dir.mkdir()
-        (self.bin_dir / "python3").write_text("#!/usr/bin/env bash\nexit 7\n")
+        (self.bin_dir / "python3").write_text(
+            "#!/usr/bin/env bash\n"
+            "[ \"${FAKE_GENERATOR_MODE:-fail}\" = zero ] && exit 0\n"
+            "exit 7\n")
         (self.bin_dir / "python3").chmod(0o755)
         self.soak_work = self.work / "rv32i_soak"
         self.soak_work.mkdir()
@@ -367,8 +379,22 @@ class SoakTargetTest(unittest.TestCase):
             env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=10,
         )
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertFalse(self.sim_marker.exists(), result.stdout + result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertIn("FAIL seed=1 - random generation failed:", combined)
+        self.assertFalse(self.sim_marker.exists(), combined)
+
+    def test_soak_rejects_zero_exit_generator_with_stale_seed_files(self):
+        self.env["FAKE_GENERATOR_MODE"] = "zero"
+        result = subprocess.run(
+            [str(self.repo / "tools/soak.sh"), "1", "5"], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10,
+        )
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertIn("FAIL seed=1 - generated files missing or empty:", combined)
+        self.assertFalse(self.sim_marker.exists(), combined)
 
 
 class ComplianceRunnerTest(unittest.TestCase):
