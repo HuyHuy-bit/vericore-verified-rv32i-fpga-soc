@@ -78,6 +78,7 @@ require_tool() {
 load_versions
 require_tool riscv64-unknown-elf-gcc
 require_tool riscv64-unknown-elf-nm
+require_tool riscv64-unknown-elf-objcopy
 require_tool python3
 require_tool diff
 require_tool git

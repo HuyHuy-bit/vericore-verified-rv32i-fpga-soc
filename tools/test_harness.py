@@ -81,7 +81,7 @@ class HarnessTest(unittest.TestCase):
         self.wrong_loop_hex = self.write("wrong-loop.hex", WRONG_LOOP)
         self.load_use_hex = self.write("load-use.hex", LOAD_USE)
         self.memory_hex = self.write("memory.hex", MEMORY)
-        self.valid_ref = self.write("valid.ref", "cycles=20\n")
+        self.valid_ref = self.write("valid.ref", "cycles=20\nx0=0\n")
         self.memory_ref = self.write(
             "memory.ref",
             "cycles=20\nx2=42\nx4=0xFFFFFFFF\nx5=65535\nx7=0xFFFFFFFF\nx8=255\nx10=100\n",
@@ -133,6 +133,14 @@ class HarnessTest(unittest.TestCase):
     def test_out_of_range_reference_is_rejected(self):
         self.reference_failure("cycles=20\nx32=0\n", "error: reference register out of range: x32")
 
+    def test_noncanonical_register_keys_are_rejected(self):
+        for key in ("x00", "x01", "x0001"):
+            with self.subTest(key=key):
+                self.reference_failure(
+                    f"cycles=20\n{key}=0\n",
+                    f"error: malformed reference register key: {key}",
+                )
+
     def test_signed_and_overflowed_reference_values_are_rejected(self):
         for contents in ("cycles=-1\n", "cycles=4294967296\n", "x1=0x100000000\n"):
             with self.subTest(contents=contents):
@@ -165,10 +173,28 @@ class HarnessTest(unittest.TestCase):
         result = self.invoke("+STOP=tohost", "+CYCLES=20")
         self.assert_failure(result, "error: verification mode requires a result consumer")
 
+    def test_cycles_only_reference_is_not_a_checked_consumer(self):
+        ref = self.write("cycles-only.ref", "cycles=20\n")
+        result = self.invoke("+STOP=tohost", "+CYCLES=20", f"+REFFILE={ref}")
+        self.assert_failure(
+            result,
+            "error: reference file has no register or stalls expectations",
+        )
+
+    def test_cycles_only_reference_is_valid_metadata_with_an_rvfi_consumer(self):
+        ref = self.write("cycles-metadata.ref", "cycles=20\n")
+        trace = self.work / "cycles-metadata.rvfi"
+        result = self.invoke(
+            "+STOP=tohost", "+CYCLES=20", f"+REFFILE={ref}",
+            f"+RVFI_TRACE={trace}",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertGreater(trace.stat().st_size, 0)
+
     # These tests name terminal/result failures independently, so a later
     # successful reference comparison cannot erase an earlier failure.
     def test_non_success_tohost_is_a_failure(self):
-        ref = self.write("pass.ref", "cycles=20\n")
+        ref = self.write("pass.ref", "cycles=20\nx0=0\n")
         result = subprocess.run(
             [str(SIM), f"+MEMFILE={self.fail_hex}", "+VCD=", "+STOP=tohost",
              "+CYCLES=20", f"+REFFILE={ref}"],
@@ -197,17 +223,69 @@ class HarnessTest(unittest.TestCase):
 
     def test_failed_cache_drain_is_a_failure(self):
         result = self.invoke("+STOP=tohost", "+CYCLES=20", "+SIGFILE=/dev/null",
+                          "+SIGSTART=0", "+SIGEND=1",
                           "+TEST_FORCE_CACHE_DRAIN_TIMEOUT=1")
         self.assert_failure(result, "error: cache drain deadline exhausted")
 
     def test_result_output_open_failure_is_a_failure(self):
         result = self.invoke("+STOP=tohost", "+CYCLES=20",
-                          f"+SIGFILE={self.work / 'absent' / 'sig'}")
+                          f"+SIGFILE={self.work / 'absent' / 'sig'}",
+                          "+SIGSTART=0", "+SIGEND=1")
         self.assert_failure(result, "error: cannot open signature output")
 
     def test_result_output_write_failure_is_a_failure(self):
-        result = self.invoke("+STOP=tohost", "+CYCLES=20", "+SIGFILE=/dev/full", "+SIGEND=1")
+        result = self.invoke("+STOP=tohost", "+CYCLES=20", "+SIGFILE=/dev/full",
+                          "+SIGSTART=0", "+SIGEND=1")
         self.assert_failure(result, "error: failed writing signature output")
+
+    def signature_failure(self, diagnostic, *bounds):
+        result = self.invoke(
+            "+STOP=tohost", "+CYCLES=20",
+            f"+SIGFILE={self.work / 'invalid.sig'}", *bounds,
+        )
+        self.assert_failure(result, diagnostic)
+
+    def test_signature_requires_both_bounds_exactly_once(self):
+        for bounds in ((), ("+SIGSTART=0",), ("+SIGEND=1",)):
+            with self.subTest(bounds=bounds):
+                self.signature_failure(
+                    "error: signature output requires exactly one SIGSTART and SIGEND",
+                    *bounds,
+                )
+
+    def test_signature_rejects_equal_and_reversed_bounds(self):
+        for start, end in ((1, 1), (2, 1)):
+            with self.subTest(start=start, end=end):
+                self.signature_failure(
+                    "error: signature range must satisfy start < end",
+                    f"+SIGSTART={start}", f"+SIGEND={end}",
+                )
+
+    def test_signature_rejects_out_of_range_end(self):
+        self.signature_failure(
+            "error: signature end exceeds data memory word count",
+            "+SIGSTART=16384", "+SIGEND=16385",
+        )
+
+    def test_signature_rejects_duplicate_bounds(self):
+        for bounds in (
+            ("+SIGSTART=0", "+SIGSTART=1", "+SIGEND=2"),
+            ("+SIGSTART=0", "+SIGEND=1", "+SIGEND=2"),
+        ):
+            with self.subTest(bounds=bounds):
+                self.signature_failure(
+                    "error: signature output requires exactly one SIGSTART and SIGEND",
+                    *bounds,
+                )
+
+    def test_valid_signature_range_is_a_result_consumer(self):
+        signature = self.work / "valid.sig"
+        result = self.invoke(
+            "+STOP=tohost", "+CYCLES=20", f"+SIGFILE={signature}",
+            "+SIGSTART=0", "+SIGEND=1",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertRegex(signature.read_text(), r"^[0-9a-f]{8}\n$")
 
     def test_successful_tohost_reference_and_stalls_check(self):
         ref = self.write("valid.ref", "cycles=30\nstalls=3\nx1=42\nx8=205\n")
@@ -304,13 +382,20 @@ import sys
 out = Path(sys.argv[sys.argv.index("--Mdir") + 1])
 out.mkdir(parents=True, exist_ok=True)
 (out / "Vcpu").write_text('''#!{sys.executable}
+import os
 from pathlib import Path
 import sys
 for arg in sys.argv[1:]:
     if arg.startswith("+MEMFILE=") and arg.endswith("t01_rtype.hex"):
-        sys.exit(7)
+        mode = os.environ.get("FAKE_COVERAGE_MODE", "sim-failure")
+        if mode == "sim-failure":
+            sys.exit(7)
+        if mode == "missing":
+            sys.exit(0)
     if arg.startswith("+COVERAGE="):
-        Path(arg.split("=", 1)[1]).write_text("coverage\\\\n")
+        empty = os.environ.get("FAKE_COVERAGE_MODE") == "empty" \
+            and any(item.endswith("t01_rtype.hex") for item in sys.argv)
+        Path(arg.split("=", 1)[1]).write_text("" if empty else "coverage\\\\n")
 sys.exit(0)
 ''')
 (out / "Vcpu").chmod(0o755)
@@ -336,6 +421,23 @@ elif sys.argv[1] == "--annotate":
         self.assertIn("coverage simulation failed: t01_rtype", combined)
         self.assertFalse(self.merge_marker.exists(), combined)
 
+    def test_coverage_rejects_missing_and_empty_artifacts_before_merge(self):
+        for mode in ("missing", "empty"):
+            with self.subTest(mode=mode):
+                self.env["FAKE_COVERAGE_MODE"] = mode
+                self.merge_marker.unlink(missing_ok=True)
+                result = subprocess.run(
+                    ["make", "coverage"], cwd=self.repo, env=self.env,
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=20,
+                )
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0, combined)
+                self.assertIn(
+                    "coverage artifact missing or empty: t01_rtype", combined,
+                )
+                self.assertFalse(self.merge_marker.exists(), combined)
+
 
 class SoakTargetTest(unittest.TestCase):
     """Exercise the real soak wrapper's handling of generator failure."""
@@ -349,16 +451,29 @@ class SoakTargetTest(unittest.TestCase):
         shutil.copy2(ROOT / "tools/soak.sh", self.repo / "tools/soak.sh")
         (self.repo / "tools/rand_gen.py").write_text("")
         self.sim_marker = self.work / "simulator-ran"
+        self.generator_marker = self.work / "generator-ran"
         self.sim = self.repo / "obj_dir/Vcpu"
-        self.sim.write_text("#!/usr/bin/env bash\ntouch \"$FAKE_SIM_MARKER\"\nexit 0\n")
+        self.sim.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > \"$FAKE_SIM_MARKER\"\nexit 0\n")
         self.sim.chmod(0o755)
         self.bin_dir = self.work / "bin"
         self.bin_dir.mkdir()
         (self.bin_dir / "python3").write_text(
             "#!/usr/bin/env bash\n"
+            ": > \"$FAKE_GENERATOR_MARKER\"\n"
+            "if [ \"${FAKE_GENERATOR_MODE:-fail}\" = success ]; then\n"
+            "  printf '00100f93\\n00010f37\\nff0f0f13\\n01ff2023\\n0000006f\\n' > \"${@: -2:1}\"\n"
+            "  printf 'cycles=99\\nx0=0\\n' > \"${@: -1}\"\n"
+            "  exit 0\n"
+            "fi\n"
             "[ \"${FAKE_GENERATOR_MODE:-fail}\" = zero ] && exit 0\n"
             "exit 7\n")
         (self.bin_dir / "python3").chmod(0o755)
+        (self.bin_dir / "seq").write_text(
+            "#!/usr/bin/env bash\n"
+            "[ \"${FAKE_SEQ_EMPTY:-0}\" = 1 ] && exit 0\n"
+            "exec /usr/bin/seq \"$@\"\n")
+        (self.bin_dir / "seq").chmod(0o755)
         self.soak_work = self.work / "rv32i_soak"
         self.soak_work.mkdir()
         (self.soak_work / "s1.hex").write_text("stale program\n")
@@ -368,6 +483,7 @@ class SoakTargetTest(unittest.TestCase):
             "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
             "TMPDIR": str(self.work),
             "FAKE_SIM_MARKER": str(self.sim_marker),
+            "FAKE_GENERATOR_MARKER": str(self.generator_marker),
         })
 
     def tearDown(self):
@@ -395,6 +511,345 @@ class SoakTargetTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, combined)
         self.assertIn("FAIL seed=1 - generated files missing or empty:", combined)
         self.assertFalse(self.sim_marker.exists(), combined)
+
+    def test_soak_rejects_invalid_counts_before_children_start(self):
+        for label, args, diagnostic in (
+            ("zero seeds", ("0", "5"), "error: SEEDS must be a positive integer"),
+            ("nonnumeric seeds", ("many", "5"), "error: SEEDS must be a positive integer"),
+            ("zero instructions", ("1", "0"), "error: INSTRS must be a positive integer"),
+            ("nonnumeric instructions", ("1", "many"), "error: INSTRS must be a positive integer"),
+        ):
+            with self.subTest(label=label):
+                self.generator_marker.unlink(missing_ok=True)
+                self.sim_marker.unlink(missing_ok=True)
+                result = subprocess.run(
+                    [str(self.repo / "tools/soak.sh"), *args], cwd=self.repo,
+                    env=self.env, text=True, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, timeout=10,
+                )
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0, combined)
+                self.assertIn(diagnostic, combined)
+                self.assertFalse(self.generator_marker.exists(), combined)
+                self.assertFalse(self.sim_marker.exists(), combined)
+
+    def test_soak_requires_every_requested_seed_to_pass(self):
+        self.env["FAKE_SEQ_EMPTY"] = "1"
+        result = subprocess.run(
+            [str(self.repo / "tools/soak.sh"), "1", "5"], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10,
+        )
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertIn("0/0 random seeds passed", combined)
+
+    def test_soak_requests_tohost_completion_for_generated_programs(self):
+        self.env["FAKE_GENERATOR_MODE"] = "success"
+        result = subprocess.run(
+            [str(self.repo / "tools/soak.sh"), "1", "5"], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        sim_args = self.sim_marker.read_text()
+        self.assertIn("+STOP=tohost", sim_args)
+        self.assertNotIn("+STOP=selfloop", sim_args)
+
+
+class RandomGeneratorContractTest(unittest.TestCase):
+    """Keep Python-model and Spike completion mappings explicit and separate."""
+
+    TOHOST_TAIL = [
+        "00100f93", "00010f37", "ff0f0f13", "01ff2023", "0000006f",
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-rand-contract-")
+        self.work = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_default_program_writes_tohost_one_and_reference_tracks_completion_registers(self):
+        hexfile = self.work / "program.hex"
+        reffile = self.work / "program.ref"
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools/rand_gen.py"), "-n", "1",
+             "--seed", "7", str(hexfile), str(reffile)],
+            cwd=ROOT, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(hexfile.read_text().splitlines()[-5:], self.TOHOST_TAIL)
+        reference = reffile.read_text().splitlines()
+        self.assertIn("x30=0xfff0", reference)
+        self.assertIn("x31=0x1", reference)
+
+    def test_spike_program_remains_selfloop_terminated_without_tohost_sequence(self):
+        asm = self.work / "program.S"
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools/rand_gen.py"), "-n", "1",
+             "--seed", "7", "--spike", str(asm)],
+            cwd=ROOT, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        words = [line.split("0x", 1)[1] for line in asm.read_text().splitlines()
+                 if ".word 0x" in line]
+        self.assertEqual(words[-1], "0000006f")
+        self.assertNotEqual(words[-5:], self.TOHOST_TAIL)
+
+
+class Elf2HexTest(unittest.TestCase):
+    """Require converter intermediates to be fresh and invocation-private."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-elf2hex-fixture-")
+        self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        (self.repo / "compliance").mkdir(parents=True)
+        shutil.copy2(ROOT / "compliance/elf2hex.py", self.repo / "compliance/elf2hex.py")
+        self.bin_dir = self.work / "bin"
+        self.bin_dir.mkdir()
+        self.private_tmp = self.work / "tmp"
+        self.private_tmp.mkdir()
+        self.records = self.work / "records"
+        self.records.mkdir()
+        self.objcopy = self.bin_dir / "riscv64-unknown-elf-objcopy"
+        self.objcopy.write_text(f"""#!{sys.executable}
+import os
+from pathlib import Path
+import sys
+import time
+
+out = Path(sys.argv[-1])
+allowed = Path(os.environ["FAKE_ALLOWED_TMP"])
+if allowed not in out.parents:
+    print(f"refusing non-private objcopy path: {{out}}", file=sys.stderr)
+    sys.exit(23)
+if os.environ.get("FAKE_OBJCOPY_MODE") == "no-output":
+    sys.exit(0)
+kind = "data" if "--only-section=.data" in sys.argv else "text"
+record = Path(os.environ["FAKE_OBJCOPY_RECORDS"])
+(record / f"{{os.getpid()}}-{{kind}}.path").write_text(str(out))
+if kind == "text":
+    (record / f"{{os.getpid()}}.started").write_text("started")
+    deadline = time.monotonic() + 5
+    while len(list(record.glob("*.started"))) < 2:
+        if time.monotonic() >= deadline:
+            print("concurrency barrier timed out", file=sys.stderr)
+            sys.exit(24)
+        time.sleep(0.01)
+    value = int(Path(sys.argv[-2]).read_text().strip())
+    out.write_bytes(value.to_bytes(4, "little"))
+else:
+    out.write_bytes(b"")
+""")
+        self.objcopy.chmod(0o755)
+        self.env = os.environ.copy()
+        self.env.update({
+            "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
+            "TMPDIR": str(self.private_tmp),
+            "FAKE_ALLOWED_TMP": str(self.private_tmp),
+            "FAKE_OBJCOPY_RECORDS": str(self.records),
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_concurrent_conversions_use_distinct_private_intermediates(self):
+        processes = []
+        outputs = []
+        for number in (1, 2):
+            elf = self.work / f"case-{number}.elf"
+            instr = self.work / f"case-{number}.instr.hex"
+            data = self.work / f"case-{number}.data.hex"
+            elf.write_text(str(number))
+            outputs.append((instr, data))
+            processes.append(subprocess.Popen(
+                [sys.executable, str(self.repo / "compliance/elf2hex.py"),
+                 str(elf), str(instr), str(data)],
+                cwd=self.repo, env=self.env, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ))
+        results = [process.communicate(timeout=10) + (process.returncode,)
+                   for process in processes]
+        for stdout, stderr, returncode in results:
+            self.assertEqual(returncode, 0, stdout + stderr)
+        self.assertEqual(outputs[0][0].read_text(), "00000001\n")
+        self.assertEqual(outputs[1][0].read_text(), "00000002\n")
+        paths = [Path(path.read_text()) for path in self.records.glob("*.path")]
+        self.assertEqual(len(paths), 4)
+        self.assertEqual(len(set(paths)), 4)
+        self.assertEqual(len({path.parent for path in paths}), 2)
+        self.assertTrue(all(self.private_tmp in path.parents for path in paths))
+
+    def test_zero_status_objcopy_without_output_cannot_reuse_stale_file(self):
+        stale = self.private_tmp / "stale.bin"
+        stale.write_bytes(b"stale")
+        self.env["FAKE_OBJCOPY_MODE"] = "no-output"
+        probe = (
+            "import importlib.util, sys; "
+            "spec=importlib.util.spec_from_file_location('elf2hex', sys.argv[1]); "
+            "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+            "module.objcopy_binary('unused.elf', ['.text'], sys.argv[2])"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe,
+             str(self.repo / "compliance/elf2hex.py"), str(stale)],
+            cwd=self.repo, env=self.env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("objcopy produced no output", result.stdout + result.stderr)
+        self.assertFalse(stale.exists(), "stale objcopy output was retained")
+
+
+class BenchmarkRunnerTest(unittest.TestCase):
+    """Exercise benchmark producer status and private-work lifecycle."""
+
+    KERNELS = ("crc32", "matmul", "sort", "llist", "interp")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-bench-fixture-")
+        self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        (self.repo / "bench").mkdir(parents=True)
+        (self.repo / "compliance/link").mkdir(parents=True)
+        (self.repo / "obj_dir").mkdir()
+        (self.repo / "rtl").mkdir()
+        shutil.copy2(ROOT / "bench/run_bench.sh", self.repo / "bench/run_bench.sh")
+        for name in ("host_main.c", "crt0.S"):
+            (self.repo / "bench" / name).write_text("placeholder\n")
+        for kernel in self.KERNELS:
+            (self.repo / "bench" / f"{kernel}.c").write_text("placeholder\n")
+        (self.repo / "compliance/link/rv32i-pipeline.ld").write_text("SECTIONS {}\n")
+        (self.repo / "compliance/elf2hex.py").write_text("# fake converter\n")
+        (self.repo / "cpu_tb.cpp").write_text("// placeholder\n")
+        (self.repo / "rtl/cpu.sv").write_text("// placeholder\n")
+        self.bin_dir = self.work / "bin"
+        self.bin_dir.mkdir()
+        self.work_log = self.work / "target-work-paths"
+        self.write_tools()
+        self.env = os.environ.copy()
+        self.env.update({
+            "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
+            "TMPDIR": str(self.work),
+            "FAKE_BENCH_WORK_LOG": str(self.work_log),
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_executable(self, path, contents):
+        path.write_text(contents)
+        path.chmod(0o755)
+
+    def write_tools(self):
+        self.write_executable(self.bin_dir / "cc", """#!/usr/bin/env bash
+set -eu
+out=
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = -o ]; then out="$2"; break; fi
+    shift
+done
+[ -n "$out" ] || exit 2
+if [ "${FAKE_CC_MODE:-ok}" = no-output ] && [ "${out##*/}" = crc32.host ]; then
+    exit 0
+fi
+printf '%s\n' '#!/usr/bin/env bash' 'printf "123\\n"' 'exit "${FAKE_HOST_RC:-0}"' > "$out"
+chmod +x "$out"
+""")
+        self.write_executable(self.bin_dir / "riscv64-unknown-elf-gcc", """#!/usr/bin/env bash
+set -eu
+out=
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = -o ]; then out="$2"; break; fi
+    shift
+done
+[ -n "$out" ] || exit 2
+printf 'ELF\n' > "$out"
+printf '%s\n' "$out" >> "$FAKE_BENCH_WORK_LOG"
+""")
+        self.write_executable(self.bin_dir / "riscv64-unknown-elf-size", """#!/usr/bin/env bash
+printf '%s\n' 'section size addr' '.text 4 0'
+exit "${FAKE_SIZE_RC:-0}"
+""")
+        self.write_executable(self.bin_dir / "python3", """#!/usr/bin/env bash
+set -eu
+printf '0000006f\n' > "$3"
+: > "$4"
+""")
+        self.write_executable(self.repo / "obj_dir/Vcpu", """#!/usr/bin/env bash
+printf '%s\n' \
+  '  perf: cycles=10 instret=5 stalls=0 flushes=0 memstall=0 CPI=2' \
+  '  bpred: branches=0 mispredicts=0 accuracy=0%' \
+  '  icache: accesses=0 misses=0 hitrate=0%' \
+  '  dcache: accesses=0 misses=0 hitrate=0%'
+exit 0
+""")
+
+    def run_bench(self, *args, **updates):
+        env = self.env.copy()
+        env.update(updates)
+        return subprocess.run(
+            [str(self.repo / "bench/run_bench.sh"), *args], cwd=self.repo,
+            env=env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=20,
+        )
+
+    def retained_directory(self, result):
+        combined = result.stdout + result.stderr
+        match = re.search(r"diagnostics retained in (\S+)", combined)
+        self.assertIsNotNone(match, combined)
+        retained = Path(match.group(1))
+        self.assertTrue(retained.is_dir(), combined)
+        return retained
+
+    def test_native_reference_nonzero_with_plausible_output_is_a_failure(self):
+        result = self.run_bench(FAKE_HOST_RC="7")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("host reference execution failed", result.stdout + result.stderr)
+        self.retained_directory(result)
+
+    def test_zero_output_host_build_cannot_reuse_stale_executable(self):
+        legacy = self.work / "rv32i_bench"
+        legacy.mkdir()
+        stale = legacy / "crc32.host"
+        self.write_executable(stale, "#!/usr/bin/env bash\nprintf '123\\n'\nexit 0\n")
+        result = self.run_bench(FAKE_CC_MODE="no-output")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("host build produced no executable", result.stdout + result.stderr)
+
+    def test_size_inspection_failure_is_propagated(self):
+        result = self.run_bench(FAKE_SIZE_RC="7")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("size inspection failed", result.stdout + result.stderr)
+
+    def test_successful_invocations_use_unique_cleaned_work_directories(self):
+        first = self.run_bench()
+        second = self.run_bench()
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        elf_paths = [Path(line) for line in self.work_log.read_text().splitlines()]
+        self.assertEqual(len(elf_paths), 2 * len(self.KERNELS))
+        first_work = elf_paths[0].parent
+        second_work = elf_paths[len(self.KERNELS)].parent
+        self.assertNotEqual(first_work, second_work)
+        self.assertFalse(first_work.exists())
+        self.assertFalse(second_work.exists())
+
+    def test_keep_work_retains_successful_invocation(self):
+        result = self.run_bench(KEEP_WORK="1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.retained_directory(result)
+
+    def test_invalid_numeric_configuration_is_rejected_before_producers(self):
+        result = self.run_bench("0")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LATENCY must be a positive integer", result.stdout + result.stderr)
+        self.assertFalse(self.work_log.exists(), result.stdout + result.stderr)
 
 
 class ComplianceRunnerTest(unittest.TestCase):
@@ -469,6 +924,9 @@ exit 2
         self.write(self.bin_dir / "riscv64-unknown-elf-nm", """#!/usr/bin/env bash
 if [ "${FAKE_NM_MODE:-ok}" = crash ]; then exit 7; fi
 printf '%s\\n' '00000000 T begin_signature' '00000004 T end_signature'
+""")
+        self.write(self.bin_dir / "riscv64-unknown-elf-objcopy", """#!/usr/bin/env bash
+exit 0
 """)
         self.write(self.bin_dir / "python3", """#!/usr/bin/env bash
 set -eu
@@ -572,12 +1030,25 @@ fi
     def test_compliance_rejects_missing_git_tool(self):
         no_git = self.work / "no-git-bin"
         no_git.mkdir()
-        for name in ("riscv64-unknown-elf-gcc", "riscv64-unknown-elf-nm", "python3", "diff"):
+        for name in ("riscv64-unknown-elf-gcc", "riscv64-unknown-elf-nm",
+                     "riscv64-unknown-elf-objcopy", "python3", "diff"):
             (no_git / name).symlink_to(self.bin_dir / name)
         (no_git / "bash").symlink_to("/bin/bash")
         (no_git / "dirname").symlink_to("/usr/bin/dirname")
         self.env["PATH"] = str(no_git)
         self.assert_runner_failure("error: required tool not found: git")
+
+    def test_compliance_rejects_missing_objcopy_tool(self):
+        no_objcopy = self.work / "no-objcopy-bin"
+        no_objcopy.mkdir()
+        for name in ("riscv64-unknown-elf-gcc", "riscv64-unknown-elf-nm",
+                     "python3", "diff", "git"):
+            (no_objcopy / name).symlink_to(self.bin_dir / name)
+        (no_objcopy / "bash").symlink_to("/bin/bash")
+        (no_objcopy / "dirname").symlink_to("/usr/bin/dirname")
+        self.env["PATH"] = str(no_objcopy)
+        self.assert_runner_failure(
+            "error: required tool not found: riscv64-unknown-elf-objcopy")
 
     def test_compliance_rejects_simulator_crash_with_stale_signature(self):
         self.env["FAKE_SIM_MODE"] = "crash"
@@ -632,6 +1103,8 @@ class LockstepTest(unittest.TestCase):
         self.pidfile = self.work / "peer.pid"
         self.trace_arg = self.work / "trace-arg"
         self.spike_marker = self.work / "spike-started"
+        self.lockstep_tmp = self.work / "tmp"
+        self.lockstep_tmp.mkdir()
         self.env = os.environ.copy()
         self.env.update({
             "SPIKE": str(self.spike),
@@ -640,6 +1113,7 @@ class LockstepTest(unittest.TestCase):
             "FAKE_PIDFILE": str(self.pidfile),
             "FAKE_TRACE_ARG": str(self.trace_arg),
             "FAKE_SPIKE_MARKER": str(self.spike_marker),
+            "TMPDIR": str(self.lockstep_tmp),
         })
         self.write_executable(self.sim, self.fake_simulator())
         self.write_executable(self.spike, self.fake_spike())
@@ -836,6 +1310,22 @@ while True: time.sleep(1)
                 self.env["FAKE_RTL_TRACE"] = record
                 self.assert_lockstep_failure("malformed RTL trace record")
 
+    def test_noncanonical_rtl_field_spellings_are_rejected(self):
+        for label, record in (
+            ("signed pc", "+80000000 00100093 1 00000001\n" + self.RTL_END),
+            ("prefixed pc", "0x80000000 00100093 1 00000001\n" + self.RTL_END),
+            ("short pc", "8000000 00100093 1 00000001\n" + self.RTL_END),
+            ("underscore insn", "80000000 0000_06f 1 00000001\n" + self.RTL_END),
+            ("reviewer underscore", "80000000 0000_006f 0 00000000\n"),
+            ("signed rd", "80000000 00100093 +1 00000001\n" + self.RTL_END),
+            ("leading-zero rd", "80000000 00100093 01 00000001\n" + self.RTL_END),
+            ("prefixed wdata", "80000000 00100093 1 0x00000001\n" + self.RTL_END),
+            ("junk wdata", "80000000 00100093 1 00000001junk\n" + self.RTL_END),
+        ):
+            with self.subTest(label=label):
+                self.env["FAKE_RTL_TRACE"] = record
+                self.assert_lockstep_failure("malformed RTL trace record")
+
     def test_nonfinite_deadlines_are_rejected_before_children_start(self):
         for timeout in ("nan", "inf", "+inf", "-inf"):
             with self.subTest(timeout=timeout):
@@ -848,23 +1338,17 @@ while True: time.sleep(1)
                                  "nonfinite deadline started Spike")
 
     def test_exact_terminal_inclusive_equality_uses_private_trace(self):
-        shared = Path("/tmp/_rvfi.trace")
-        old = shared.read_bytes() if shared.exists() else None
+        shared = self.lockstep_tmp / "_rvfi.trace"
         shared.write_text("do-not-touch\n")
-        try:
-            result = self.run_lockstep()
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("2 retirements match through terminal self-loop", result.stdout)
-            self.assertTrue(self.spike_marker.exists(), "fake Spike marker is not functional")
-            trace_path = Path(self.trace_arg.read_text())
-            self.assertNotEqual(trace_path, shared)
-            self.assertIn("rv32i-lockstep-", str(trace_path))
-            self.assertEqual(shared.read_text(), "do-not-touch\n")
-        finally:
-            if old is None:
-                shared.unlink(missing_ok=True)
-            else:
-                shared.write_bytes(old)
+        result = self.run_lockstep()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("2 retirements match through terminal self-loop", result.stdout)
+        self.assertTrue(self.spike_marker.exists(), "fake Spike marker is not functional")
+        trace_path = Path(self.trace_arg.read_text())
+        self.assertNotEqual(trace_path, shared)
+        self.assertEqual(trace_path.parent.parent, self.lockstep_tmp)
+        self.assertIn("rv32i-lockstep-", trace_path.parent.name)
+        self.assertEqual(shared.read_text(), "do-not-touch\n")
 
     def test_spike_stream_is_sealed_at_first_terminal_retirement(self):
         self.env["FAKE_SIM_MODE"] = "delayed_equal"
@@ -918,10 +1402,15 @@ else
 fi
 """)
         self.write_tool("riscv64-unknown-elf-gcc", """
+[ -z "${FAKE_CHILD_MARKER:-}" ] || : > "$FAKE_CHILD_MARKER"
 [ "${FAKE_GCC_RC:-0}" -eq 0 ] || exit "$FAKE_GCC_RC"
 touch "${@: -1}"
 """)
-        self.write_tool("python3", "exit \"${FAKE_PYTHON_RC:-0}\"\n")
+        self.write_tool("python3", """
+[ -z "${FAKE_CHILD_MARKER:-}" ] || : > "$FAKE_CHILD_MARKER"
+exit "${FAKE_PYTHON_RC:-0}"
+""")
+        self.child_marker = self.work / "child-ran"
         self.env = os.environ.copy()
         self.env.update({
             "ARCH_TEST": str(self.arch),
@@ -939,10 +1428,13 @@ touch "${@: -1}"
         path.write_text("#!/usr/bin/env bash\nset -eu\n" + body)
         path.chmod(0o755)
 
-    def run_wrapper(self):
+    def run_wrapper(self, timeout=None):
+        env = self.env.copy()
+        if timeout is not None:
+            env["LOCKSTEP_TIMEOUT"] = timeout
         return subprocess.run(
             [str(self.repo / "tools/run_lockstep.sh")], cwd=self.repo,
-            env=self.env, text=True, stdout=subprocess.PIPE,
+            env=env, text=True, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=5,
         )
 
@@ -1000,6 +1492,18 @@ exec "$REAL_PYTHON" "$@"
             + "\nARCH_TEST_EXPECTED_CASES=2\nSPIKE_SHA=" + "b" * 40 + "\n")
         self.assert_wrapper_failure("discovered 1 lockstep cases; expected 2")
 
+    def test_zero_deadlines_are_rejected_before_compiler_or_comparator(self):
+        self.add_source()
+        self.env["FAKE_CHILD_MARKER"] = str(self.child_marker)
+        for timeout in ("0", "0.0"):
+            with self.subTest(timeout=timeout):
+                self.child_marker.unlink(missing_ok=True)
+                result = self.run_wrapper(timeout=timeout)
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0, combined)
+                self.assertIn("LOCKSTEP_TIMEOUT must be greater than zero", combined)
+                self.assertFalse(self.child_marker.exists(), combined)
+
 
 class SoakLockstepWrapperTest(unittest.TestCase):
     """Require every requested random seed to produce a complete result."""
@@ -1031,6 +1535,7 @@ class SoakLockstepWrapperTest(unittest.TestCase):
         self.bin.mkdir()
         self.args_file = self.work / "lockstep.args"
         self.write_tool("riscv64-unknown-elf-gcc", """
+[ -z "${FAKE_CHILD_MARKER:-}" ] || : > "$FAKE_CHILD_MARKER"
 [ "${FAKE_GCC_RC:-0}" -eq 0 ] || exit "$FAKE_GCC_RC"
 while [ "$#" -gt 0 ]; do
     if [ "$1" = -o ]; then touch "$2"; exit 0; fi
@@ -1046,6 +1551,7 @@ else
 fi
 """)
         self.write_tool("python3", """
+[ -z "${FAKE_CHILD_MARKER:-}" ] || : > "$FAKE_CHILD_MARKER"
 case "${1##*/}" in
     rand_gen.py)
         [ "${FAKE_RANDOM_RC:-0}" -eq 0 ] || exit "$FAKE_RANDOM_RC"
@@ -1060,6 +1566,7 @@ case "${1##*/}" in
     *) exec "$REAL_PYTHON" "$@" ;;
 esac
 """)
+        self.child_marker = self.work / "child-ran"
         self.env = os.environ.copy()
         self.env.update({
             "PATH": str(self.bin) + os.pathsep + self.env["PATH"],
@@ -1077,10 +1584,13 @@ esac
         path.write_text("#!/usr/bin/env bash\nset -eu\n" + body)
         path.chmod(0o755)
 
-    def run_wrapper(self, seeds):
+    def run_wrapper(self, seeds, timeout=None):
+        env = self.env.copy()
+        if timeout is not None:
+            env["LOCKSTEP_TIMEOUT"] = timeout
         return subprocess.run(
             [str(self.repo / "tools/soak_lockstep.sh"), str(seeds), "5"],
-            cwd=self.repo, env=self.env, text=True, stdout=subprocess.PIPE,
+            cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=5,
         )
 
@@ -1118,6 +1628,17 @@ esac
         self.assertIn("deadline expired in fake random lockstep", result.stdout + result.stderr)
         self.assertIn("0/1 random seeds", result.stdout + result.stderr)
         self.assertIn("--timeout 0.25", self.args_file.read_text())
+
+    def test_zero_deadlines_are_rejected_before_generator_compiler_or_comparator(self):
+        self.env["FAKE_CHILD_MARKER"] = str(self.child_marker)
+        for timeout in ("0", "0.0"):
+            with self.subTest(timeout=timeout):
+                self.child_marker.unlink(missing_ok=True)
+                result = self.run_wrapper(1, timeout=timeout)
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0, combined)
+                self.assertIn("LOCKSTEP_TIMEOUT must be greater than zero", combined)
+                self.assertFalse(self.child_marker.exists(), combined)
 
 
 if __name__ == "__main__":

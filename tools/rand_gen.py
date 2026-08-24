@@ -40,6 +40,7 @@ R_OPS = [  # (funct3, funct7)
     (0x4, 0x00), (0x5, 0x00), (0x5, 0x20), (0x6, 0x00), (0x7, 0x00),
 ]
 I_OPS = [0x0, 0x2, 0x3, 0x4, 0x6, 0x7, 0x1, 0x5]  # funct3; shifts handled specially
+TOHOST_ONE = [0x00100F93, 0x00010F37, 0xFF0F0F13, 0x01FF2023]
 
 
 def r_type(rd, rs1, rs2, f3, f7):
@@ -212,7 +213,11 @@ def gen(n, seed):
         if kind != "store":
             recent_rd = [rd] + recent_rd[:1]
 
-    words.append(0x0000006F)  # halt: jal x0, 0
+    # Architectural completion for the directed/random harness. The following
+    # self-loop is unreachable in RTL after the committed tohost write, but it
+    # remains a useful fallback terminator for the straight-line Python model.
+    words.extend(TOHOST_ONE)
+    words.append(0x0000006F)
     return words
 
 

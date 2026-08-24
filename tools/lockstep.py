@@ -24,6 +24,9 @@ COMMIT = re.compile(
     re.IGNORECASE,
 )
 REGWR = re.compile(r"\bx\s*(\d+)\s+0x([0-9a-f]+)", re.IGNORECASE)
+RTL_RECORD = re.compile(
+    r"^([0-9a-f]{8}) ([0-9a-f]{8}) (0|[1-9]|[12][0-9]|3[01]) ([0-9a-f]{8})$"
+)
 
 
 class LockstepError(Exception):
@@ -84,21 +87,13 @@ def parse_rtl_trace(trace_path):
 
     trace = []
     for lineno, line in enumerate(lines, 1):
-        fields = line.split()
-        if len(fields) != 4:
+        match = RTL_RECORD.fullmatch(line)
+        if match is None:
             raise LockstepError(f"malformed RTL trace record at line {lineno}: {line!r}")
-        try:
-            pc = int(fields[0], 16)
-            insn = int(fields[1], 16)
-            rd = int(fields[2], 10)
-            wdata = int(fields[3], 16)
-        except ValueError as exc:
-            raise LockstepError(
-                f"malformed RTL trace record at line {lineno}: {line!r}"
-            ) from exc
-        if not 0 <= pc <= 0xFFFFFFFF or not 0 <= insn <= 0xFFFFFFFF \
-                or not 0 <= rd <= 31 or not 0 <= wdata <= 0xFFFFFFFF:
-            raise LockstepError(f"malformed RTL trace record at line {lineno}: {line!r}")
+        pc = int(match.group(1), 16)
+        insn = int(match.group(2), 16)
+        rd = int(match.group(3), 10)
+        wdata = int(match.group(4), 16)
         trace.append((pc, insn, rd, wdata if rd else 0))
 
     if trace[-1][1] != TERMINAL_INSN:

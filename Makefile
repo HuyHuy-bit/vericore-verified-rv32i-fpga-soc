@@ -119,9 +119,12 @@ coverage: assemble
 	@FAIL=0; \
 	for t in $(TESTS); do \
 	    CYCS=$$(grep '^cycles=' tests/$$t.ref 2>/dev/null | cut -d= -f2); CYCS=$${CYCS:-25}; \
+	    COVFILE=coverage/$$t.dat; rm -f "$$COVFILE"; \
 	    if ! ./$(COVDIR)/V$(TOP) +MEMFILE=tests/$$t.hex +REFFILE=tests/$$t.ref \
-	        +STOP=tohost +CYCLES=$$CYCS +VCD= +COVERAGE=coverage/$$t.dat > /dev/null; then \
+	        +STOP=tohost +CYCLES=$$CYCS +VCD= +COVERAGE="$$COVFILE" > /dev/null; then \
 	        echo "coverage simulation failed: $$t" >&2; FAIL=1; \
+	    elif [ ! -s "$$COVFILE" ]; then \
+	        echo "coverage artifact missing or empty: $$t" >&2; FAIL=1; \
 	    fi; \
 	done; \
 	[ $$FAIL -eq 0 ]

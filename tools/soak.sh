@@ -7,6 +7,10 @@ set -u
 
 SEEDS="${1:-100}"
 INSTRS="${2:-60}"
+[[ "$SEEDS" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "error: SEEDS must be a positive integer" >&2; exit 1; }
+[[ "$INSTRS" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "error: INSTRS must be a positive integer" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM="$ROOT/obj_dir/Vcpu"
 WORK_DIR=""
@@ -51,7 +55,7 @@ for seed in $(seq 1 "$SEEDS"); do
     fi
     cycles=$(grep '^cycles=' "$reff" | cut -d= -f2)
 
-    if "$SIM" +MEMFILE="$hexf" +REFFILE="$reff" +STOP=selfloop +CYCLES="$cycles" +VCD= > "$case_dir/run.log" 2>&1; then
+    if "$SIM" +MEMFILE="$hexf" +REFFILE="$reff" +STOP=tohost +CYCLES="$cycles" +VCD= > "$case_dir/run.log" 2>&1; then
         PASS=$((PASS+1))
     else
         FAIL=$((FAIL+1))
@@ -61,4 +65,4 @@ done
 
 echo ""
 echo "========== $PASS/$((PASS+FAIL)) random seeds passed (instrs=$INSTRS) =========="
-[ "$FAIL" -eq 0 ]
+[ "$FAIL" -eq 0 ] && [ "$PASS" -eq "$SEEDS" ]

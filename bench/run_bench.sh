@@ -11,13 +11,13 @@
 # both memories. icache_bytes 0 (the default) bypasses the cache entirely.
 # All of these are RTL parameters, so each combination needs its own simulator
 # build; builds are cached per-configuration under obj_dir_<cfg>.
-set -u
+set -u -o pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$BENCH_DIR")"
 LD="$ROOT/compliance/link/rv32i-pipeline.ld"
 ELF2HEX="$ROOT/compliance/elf2hex.py"
-WORK="${TMPDIR:-/tmp}/rv32i_bench"
+WORK=""
 CYCLES=600000         # testbench timeout multiplier, not a cycle budget
 
 # Positional args cover latency and the I-cache; the D-cache is configured
@@ -33,7 +33,35 @@ DC_WAYS="${DC_WAYS:-1}"
 DC_WB="${DC_WB:-0}"
 
 KERNELS=(crc32 matmul sort llist interp)
-mkdir -p "$WORK"
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+cleanup() {
+    local status=$?
+    if [ -n "$WORK" ] && [ -d "$WORK" ]; then
+        if [ "$status" -eq 0 ] && [ "${KEEP_WORK:-0}" != 1 ]; then
+            rm -rf "$WORK"
+        else
+            echo "diagnostics retained in $WORK" >&2
+        fi
+    fi
+}
+trap cleanup EXIT
+
+[[ "$LATENCY" =~ ^[1-9][0-9]*$ ]] || die "LATENCY must be a positive integer"
+[[ "$IC_BYTES" =~ ^[0-9]+$ ]] || die "IC_BYTES must be a nonnegative integer"
+[[ "$IC_BLOCK" =~ ^[1-9][0-9]*$ ]] || die "IC_BLOCK must be a positive integer"
+[[ "$IC_WAYS" =~ ^[1-9][0-9]*$ ]] || die "IC_WAYS must be a positive integer"
+[[ "$DC_BYTES" =~ ^[0-9]+$ ]] || die "DC_BYTES must be a nonnegative integer"
+[[ "$DC_BLOCK" =~ ^[1-9][0-9]*$ ]] || die "DC_BLOCK must be a positive integer"
+[[ "$DC_WAYS" =~ ^[1-9][0-9]*$ ]] || die "DC_WAYS must be a positive integer"
+[[ "$DC_WB" = 0 || "$DC_WB" = 1 ]] || die "DC_WB must be 0 or 1"
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-bench.XXXXXX") \
+    || die "could not create benchmark work directory"
 
 if [ "$LATENCY" -le 1 ] && [ "$IC_BYTES" -eq 0 ] && [ "$DC_BYTES" -eq 0 ]; then
     SIM="$ROOT/obj_dir/Vcpu"          # the plain build the Makefile already makes
@@ -83,7 +111,20 @@ for k in "${KERNELS[@]}"; do
         echo "$k: host build failed - see $WORK/$k.host.log" >&2
         FAIL=1; continue
     fi
-    expected=$("$WORK/$k.host")
+    if [ ! -x "$WORK/$k.host" ]; then
+        echo "$k: host build produced no executable - see $WORK/$k.host.log" >&2
+        FAIL=1; continue
+    fi
+    if ! expected=$("$WORK/$k.host" 2> "$WORK/$k.host-run.log"); then
+        echo "$k: host reference execution failed - see $WORK/$k.host-run.log" >&2
+        FAIL=1; continue
+    fi
+    if [[ ! "$expected" =~ ^(0|[1-9][0-9]*)$ ]] \
+            || [ "${#expected}" -gt 10 ] \
+            || { [ "${#expected}" -eq 10 ] && [[ ! "$expected" < 4294967296 ]]; }; then
+        echo "$k: host reference output is not a 32-bit unsigned integer" >&2
+        FAIL=1; continue
+    fi
 
     # --- target build ---
     if ! riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -O2 -static -mcmodel=medany \
@@ -93,11 +134,19 @@ for k in "${KERNELS[@]}"; do
         echo "$k: target build failed - see $WORK/$k.build.log" >&2
         FAIL=1; continue
     fi
+    if [ ! -s "$WORK/$k.elf" ]; then
+        echo "$k: target build produced no ELF - see $WORK/$k.build.log" >&2
+        FAIL=1; continue
+    fi
 
     # .rodata is linked into instr_mem, but loads read data_mem. Anything
     # landing there would read back garbage on the CPU while working fine on
     # the host - exactly the kind of mismatch that wastes an afternoon.
-    rodata=$(riscv64-unknown-elf-size -A "$WORK/$k.elf" | awk '/^\.rodata/{print $2}')
+    if ! rodata=$(riscv64-unknown-elf-size -A "$WORK/$k.elf" \
+            | awk '/^\.rodata/{print $2}'); then
+        echo "$k: size inspection failed" >&2
+        FAIL=1; continue
+    fi
     if [ -n "${rodata:-}" ] && [ "$rodata" -gt 0 ]; then
         echo "$k: $rodata bytes in .rodata - unreachable by loads on this Harvard split" >&2
         FAIL=1; continue
@@ -105,6 +154,10 @@ for k in "${KERNELS[@]}"; do
 
     python3 "$ELF2HEX" "$WORK/$k.elf" "$WORK/$k.instr.hex" "$WORK/$k.data.hex" > /dev/null || {
         echo "$k: elf2hex failed" >&2; FAIL=1; continue; }
+    if [ ! -s "$WORK/$k.instr.hex" ] || [ ! -f "$WORK/$k.data.hex" ]; then
+        echo "$k: elf2hex produced missing or empty output" >&2
+        FAIL=1; continue
+    fi
 
     echo "x10=$expected" > "$WORK/$k.ref"
 

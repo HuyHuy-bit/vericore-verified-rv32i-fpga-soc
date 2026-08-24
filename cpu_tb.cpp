@@ -115,6 +115,10 @@ static bool load_reference(const std::string& path, Reference& reference) {
                 std::cerr << "error: malformed reference entry: " << line << "\n";
                 return false;
             }
+            if (key.size() > 2 && key[1] == '0') {
+                std::cerr << "error: malformed reference register key: " << key << "\n";
+                return false;
+            }
             uint32_t reg = 0;
             if (!parse_u32(key.substr(1), reg) || reg > 31) {
                 std::cerr << "error: reference register out of range: " << key << "\n";
@@ -184,11 +188,48 @@ int main(int argc, char** argv) {
     Reference reference;
     if (!reffile.empty() && !load_reference(reffile, reference)) return 1;
 
+    const bool reference_checks = reference.stalls.has_value()
+        || std::any_of(reference.regs.begin(), reference.regs.end(),
+                       [](const auto& expected) { return expected.has_value(); });
+
     const auto vcds = values_for(argc, argv, "+VCD=");
-    const std::string vcdfile = vcds.empty() ? "cpu.vcd" : vcds.back();
     const std::unique_ptr<VerilatedContext> ctx{new VerilatedContext};
     ctx->commandArgs(argc, argv);
     const std::unique_ptr<Vcpu> top{new Vcpu{ctx.get()}};
+
+    uint32_t sigstart = 0, sigend = 0;
+    if (!sigfile.empty()) {
+        const auto starts = values_for(argc, argv, "+SIGSTART=");
+        const auto ends = values_for(argc, argv, "+SIGEND=");
+        if (starts.size() != 1 || ends.size() != 1) {
+            std::cerr << "error: signature output requires exactly one SIGSTART and SIGEND\n";
+            return 1;
+        }
+        if (!parse_u32(starts[0], sigstart)) {
+            std::cerr << "error: invalid signature start: " << starts[0] << "\n";
+            return 1;
+        }
+        if (!parse_u32(ends[0], sigend)) {
+            std::cerr << "error: invalid signature end: " << ends[0] << "\n";
+            return 1;
+        }
+        if (sigstart >= sigend) {
+            std::cerr << "error: signature range must satisfy start < end\n";
+            return 1;
+        }
+        const size_t dmem_words = top->rootp->cpu__DOT__u_backend__DOT__u_data_mem__DOT__mem_array.size();
+        if (sigend > dmem_words) {
+            std::cerr << "error: signature end exceeds data memory word count: "
+                      << sigend << " > " << dmem_words << "\n";
+            return 1;
+        }
+    }
+    if (verify && !reference_checks && sigfile.empty() && rvfifile.empty()) {
+        std::cerr << "error: reference file has no register or stalls expectations\n";
+        return 1;
+    }
+
+    const std::string vcdfile = vcds.empty() ? "cpu.vcd" : vcds.back();
     VerilatedVcdC* tfp = nullptr;
     if (!vcdfile.empty()) { ctx->traceEverOn(true); tfp = new VerilatedVcdC; top->trace(tfp, 99); tfp->open(vcdfile.c_str()); }
     auto tick = [&]() {
@@ -258,20 +299,14 @@ int main(int argc, char** argv) {
         }
     }
     if (!sigfile.empty()) {
-        uint32_t sigstart = 0, sigend = 0;
-        const auto starts = values_for(argc, argv, "+SIGSTART="), ends = values_for(argc, argv, "+SIGEND=");
-        if (starts.size() > 1 || ends.size() > 1 || (!starts.empty() && !parse_u32(starts[0], sigstart)) ||
-            (!ends.empty() && !parse_u32(ends[0], sigend)) || sigend < sigstart) fail("invalid signature range");
+        std::ofstream signature(sigfile);
+        if (!signature) fail("cannot open signature output: " + sigfile);
         else {
-            std::ofstream signature(sigfile);
-            if (!signature) fail("cannot open signature output: " + sigfile);
-            else {
-                for (uint32_t i = sigstart; i < sigend; ++i) signature << std::hex << std::setw(8) << std::setfill('0')
-                    << top->rootp->cpu__DOT__u_backend__DOT__u_data_mem__DOT__mem_array[i] << "\n";
-                signature.flush();
-                if (!signature) fail("failed writing signature output: " + sigfile);
-                else std::cout << "Signature dumped: " << (sigend - sigstart) << " words -> " << sigfile << "\n";
-            }
+            for (uint32_t i = sigstart; i < sigend; ++i) signature << std::hex << std::setw(8) << std::setfill('0')
+                << top->rootp->cpu__DOT__u_backend__DOT__u_data_mem__DOT__mem_array[i] << "\n";
+            signature.flush();
+            if (!signature) fail("failed writing signature output: " + sigfile);
+            else std::cout << "Signature dumped: " << (sigend - sigstart) << " words -> " << sigfile << "\n";
         }
     }
 

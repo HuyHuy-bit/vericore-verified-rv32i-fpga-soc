@@ -59,6 +59,8 @@ load_spike_pin() {
 [[ "$CYCLES" =~ ^[1-9][0-9]*$ ]] || die "CYCLES must be a positive integer"
 [[ "$LOCKSTEP_TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] \
     || die "LOCKSTEP_TIMEOUT must be a positive number"
+[[ "$LOCKSTEP_TIMEOUT" =~ [1-9] ]] \
+    || die "LOCKSTEP_TIMEOUT must be greater than zero"
 command -v git >/dev/null 2>&1 || die "required tool not found: git"
 command -v python3 >/dev/null 2>&1 || die "required tool not found: python3"
 command -v riscv64-unknown-elf-gcc >/dev/null 2>&1 \

@@ -84,6 +84,8 @@ require_tool riscv64-unknown-elf-gcc
 [[ "$CYCLES" =~ ^[1-9][0-9]*$ ]] || die "CYCLES must be a positive integer"
 [[ "$LOCKSTEP_TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] \
     || die "LOCKSTEP_TIMEOUT must be a positive number"
+[[ "$LOCKSTEP_TIMEOUT" =~ [1-9] ]] \
+    || die "LOCKSTEP_TIMEOUT must be greater than zero"
 
 arch_sha=$(git -C "$ARCH_TEST" rev-parse HEAD 2>/dev/null) \
     || die "cannot determine architecture-test checkout SHA: $ARCH_TEST"

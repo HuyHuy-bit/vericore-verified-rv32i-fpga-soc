@@ -5,7 +5,7 @@
 #
 # Sets up the stack, zeroes .bss (elf2hex only emits .data, so NOBITS
 # sections arrive as whatever $readmemh left behind), calls bench(), and
-# parks in a self-loop. The testbench stops once the PC repeats, and
+# retires a self-loop sentinel. The testbench stops on that retirement, and
 # bench()'s return value is sitting in a0/x10 for the ref-file check.
 
     .section .text.init
