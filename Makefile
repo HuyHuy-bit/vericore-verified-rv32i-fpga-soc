@@ -130,12 +130,13 @@ coverage: assemble
 # to match the memory map Spike forces programs to link at — see
 # compliance/link/spike-lockstep.ld.
 LOCKSTEP_DIR = obj_dir_lockstep
+LOCKSTEP_TIMEOUT ?= 300
 lockstep-sim:
 	verilator $(VFLAGS) -GRESET_PC=0x80000000 --Mdir $(LOCKSTEP_DIR) \
 	    --top-module $(TOP) $(CPU_SRCS) $(TB)
 
 lockstep: lockstep-sim
-	./tools/run_lockstep.sh
+	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/run_lockstep.sh
 
 # Constrained-random regression: SEEDS random programs against the Python
 # golden model (tools/rv32i_model.py). make soak SEEDS=1000
@@ -150,7 +151,7 @@ compliance: sim
 # Random programs compared against Spike instead of the Python model, which
 # is what lets them contain branches and jumps (see tools/soak_lockstep.sh).
 soak-lockstep: lockstep-sim
-	./tools/soak_lockstep.sh $(SEEDS)
+	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/soak_lockstep.sh $(SEEDS)
 
 clean:
 	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov obj_dir_lockstep coverage tests/*.hex tests/*.vcd cpu.vcd

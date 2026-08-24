@@ -6,6 +6,7 @@ They intentionally exercise the simulator CLI rather than its implementation.
 """
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -479,6 +480,422 @@ fi
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("discovered=1 passed=1 failed=0 skipped/missing=0 infrastructure=0",
                       result.stdout + result.stderr)
+
+
+class LockstepTest(unittest.TestCase):
+    """Drive the real lockstep comparator with deterministic child processes."""
+
+    RTL_A = "80000000 00100093 1 00000001\n"
+    RTL_B = "80000004 00200113 2 00000002\n"
+    RTL_END = "80000008 0000006f 0 00000000\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-lockstep-fixture-")
+        self.work = Path(self.tmp.name)
+        self.sim = self.work / "sim.py"
+        self.spike = self.work / "spike.py"
+        self.elf = self.write("case.elf", "")
+        self.instr = self.write("case.instr.hex", "0000006f\n")
+        self.data = self.write("case.data.hex", "")
+        self.pidfile = self.work / "peer.pid"
+        self.trace_arg = self.work / "trace-arg"
+        self.env = os.environ.copy()
+        self.env.update({
+            "SPIKE": str(self.spike),
+            "FAKE_SIM_MODE": "equal",
+            "FAKE_SPIKE_MODE": "equal",
+            "FAKE_PIDFILE": str(self.pidfile),
+            "FAKE_TRACE_ARG": str(self.trace_arg),
+        })
+        self.write_executable(self.sim, self.fake_simulator())
+        self.write_executable(self.spike, self.fake_spike())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, name, contents):
+        path = self.work / name
+        path.write_text(contents)
+        return path
+
+    def write_executable(self, path, contents):
+        path.write_text(contents)
+        path.chmod(0o755)
+
+    def fake_simulator(self):
+        return f"""#!{sys.executable}
+import os, signal, sys, time
+mode = os.environ.get("FAKE_SIM_MODE", "equal")
+trace = ""
+for arg in sys.argv[1:]:
+    if arg.startswith("+RVFI_TRACE="):
+        trace = arg.split("=", 1)[1]
+required = {{"+STOP=selfloop", "+VCD="}}
+if not required.issubset(sys.argv[1:]) or not trace:
+    print("fake simulator: missing required lockstep arguments", file=sys.stderr)
+    sys.exit(19)
+open(os.environ["FAKE_TRACE_ARG"], "w").write(trace)
+if mode in ("hang", "timeout"):
+    open(os.environ["FAKE_PIDFILE"], "w").write(str(os.getpid()))
+    while True: time.sleep(1)
+if mode == "delayed_equal": time.sleep(0.2)
+records = {{
+    "equal": {self.RTL_A + self.RTL_END!r},
+    "crash": {self.RTL_A + self.RTL_END!r},
+    "missing": None,
+    "empty": "",
+    "malformed": "not an rvfi record\\n",
+    "nonterminal": {self.RTL_A!r},
+    "prefix": {self.RTL_A + self.RTL_END!r},
+    "diverge0": "80000000 00200093 1 00000002\\n" + {self.RTL_END!r},
+    "delayed_equal": {self.RTL_A + self.RTL_END!r},
+}}
+if records[mode] is not None:
+    open(trace, "w").write(records[mode])
+print("SIM-STDOUT-DETAIL")
+print("SIM-STDERR-DETAIL", file=sys.stderr)
+sys.exit(7 if mode == "crash" else 0)
+"""
+
+    def fake_spike(self):
+        return f"""#!{sys.executable}
+import os, signal, sys, time
+mode = os.environ.get("FAKE_SPIKE_MODE", "equal")
+def emit(pc, insn, tail=""):
+    print(f"core   0: 3 0x{{pc}} (0x{{insn}}){{tail}}", file=sys.stderr, flush=True)
+def emit_terminal_on_shutdown(signum, frame):
+    emit("80000008", "0000006f")
+    sys.exit(0)
+if mode == "repeat_terminal": signal.signal(signal.SIGTERM, emit_terminal_on_shutdown)
+if mode == "crash":
+    open(os.environ["FAKE_PIDFILE"], "w").write(str(os.getpid()))
+    print("SPIKE-CRASH-DETAIL", file=sys.stderr, flush=True)
+    sys.exit(8)
+if mode in ("hang", "timeout"):
+    open(os.environ["FAKE_PIDFILE"], "w").write(str(os.getpid()))
+    while True: time.sleep(1)
+emit("80000000", "00100093", " x1  0x00000001")
+if mode == "prefix": emit("80000004", "00200113", " x2  0x00000002")
+if mode != "nonterminal": emit("80000008", "0000006f")
+if mode == "repeat_terminal":
+    while True:
+        time.sleep(0.02)
+        emit("80000008", "0000006f")
+if mode == "nonterminal":
+    open(os.environ["FAKE_PIDFILE"], "w").write(str(os.getpid()))
+while True: time.sleep(1)
+"""
+
+    def run_lockstep(self, timeout="0.6"):
+        return subprocess.run(
+            [sys.executable, str(ROOT / "tools/lockstep.py"), str(self.elf),
+             str(self.instr), str(self.data), "--sim", str(self.sim),
+             "--cycles", "10", "--timeout", timeout],
+            cwd=ROOT, env=self.env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=5,
+        )
+
+    def assert_lockstep_failure(self, diagnostic):
+        result = self.run_lockstep()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stdout + result.stderr)
+        return result
+
+    def assert_recorded_peer_reaped(self):
+        pid = int(self.pidfile.read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def test_simulator_crash_rejects_stale_trace_and_preserves_diagnostics(self):
+        self.env["FAKE_SIM_MODE"] = "crash"
+        result = self.assert_lockstep_failure("simulator exited with status 7")
+        self.assertIn("SIM-STDOUT-DETAIL", result.stdout + result.stderr)
+        self.assertIn("SIM-STDERR-DETAIL", result.stdout + result.stderr)
+
+    def test_missing_empty_and_malformed_rtl_traces_are_rejected(self):
+        for mode, diagnostic in (
+            ("missing", "RTL trace is missing"),
+            ("empty", "RTL trace is empty"),
+            ("malformed", "malformed RTL trace record at line 1"),
+        ):
+            with self.subTest(mode=mode):
+                self.env["FAKE_SIM_MODE"] = mode
+                self.assert_lockstep_failure(diagnostic)
+
+    def test_nonterminal_rtl_trace_is_rejected(self):
+        self.env["FAKE_SIM_MODE"] = "nonterminal"
+        self.assert_lockstep_failure("RTL trace does not end with terminal self-loop")
+
+    def test_matching_prefix_truncation_is_rejected(self):
+        self.env["FAKE_SIM_MODE"] = "prefix"
+        self.env["FAKE_SPIKE_MODE"] = "prefix"
+        self.assert_lockstep_failure("trace length mismatch: rtl=2 spike=3")
+
+    def test_first_retirement_divergence_reports_index_and_both_values(self):
+        self.env["FAKE_SIM_MODE"] = "diverge0"
+        result = self.assert_lockstep_failure("diverged at retirement 0")
+        combined = result.stdout + result.stderr
+        self.assertIn("RTL   pc=0x80000000 insn=0x00200093", combined)
+        self.assertIn("SPIKE pc=0x80000000 insn=0x00100093", combined)
+        retained = re.search(r"diagnostics retained in (\S+)", combined)
+        self.assertIsNotNone(retained, combined)
+        diagnostic_dir = Path(retained.group(1))
+        try:
+            self.assertTrue((diagnostic_dir / "sim.stdout").exists())
+            self.assertTrue((diagnostic_dir / "spike.stderr").exists())
+        finally:
+            shutil.rmtree(diagnostic_dir)
+
+    def test_missing_spike_terminal_sentinel_times_out(self):
+        self.env["FAKE_SPIKE_MODE"] = "nonterminal"
+        self.assert_lockstep_failure("deadline expired waiting for Spike terminal self-loop")
+
+    def test_deadline_expiry_terminates_and_reaps_children(self):
+        self.env["FAKE_SIM_MODE"] = "timeout"
+        self.env["FAKE_SPIKE_MODE"] = "timeout"
+        self.assert_lockstep_failure("lockstep deadline expired")
+        self.assert_recorded_peer_reaped()
+
+    def test_simulator_failure_terminates_and_reaps_spike_peer(self):
+        self.env["FAKE_SIM_MODE"] = "crash"
+        self.env["FAKE_SPIKE_MODE"] = "hang"
+        self.assert_lockstep_failure("simulator exited with status 7")
+        self.assert_recorded_peer_reaped()
+
+    def test_spike_failure_terminates_and_reaps_simulator_peer(self):
+        self.env["FAKE_SIM_MODE"] = "hang"
+        self.env["FAKE_SPIKE_MODE"] = "crash"
+        result = self.assert_lockstep_failure("Spike exited with status 8")
+        self.assertIn("SPIKE-CRASH-DETAIL", result.stdout + result.stderr)
+        self.assert_recorded_peer_reaped()
+
+    def test_exact_terminal_inclusive_equality_uses_private_trace(self):
+        shared = Path("/tmp/_rvfi.trace")
+        old = shared.read_bytes() if shared.exists() else None
+        shared.write_text("do-not-touch\n")
+        try:
+            result = self.run_lockstep()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("2 retirements match through terminal self-loop", result.stdout)
+            trace_path = Path(self.trace_arg.read_text())
+            self.assertNotEqual(trace_path, shared)
+            self.assertIn("rv32i-lockstep-", str(trace_path))
+            self.assertEqual(shared.read_text(), "do-not-touch\n")
+        finally:
+            if old is None:
+                shared.unlink(missing_ok=True)
+            else:
+                shared.write_bytes(old)
+
+    def test_spike_stream_is_sealed_at_first_terminal_retirement(self):
+        self.env["FAKE_SIM_MODE"] = "delayed_equal"
+        self.env["FAKE_SPIKE_MODE"] = "repeat_terminal"
+        result = self.run_lockstep()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("2 retirements match through terminal self-loop", result.stdout)
+
+
+class LockstepWrapperTest(unittest.TestCase):
+    """Check wrapper accounting without compilers, RTL, or Spike."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-lockstep-wrapper-")
+        self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        self.arch = self.work / "arch"
+        self.src_dir = self.arch / "riscv-test-suite/rv32i_m/I/src"
+        self.src_dir.mkdir(parents=True)
+        (self.arch / "riscv-test-env/p").mkdir(parents=True)
+        (self.repo / "tools").mkdir(parents=True)
+        (self.repo / "compliance/link").mkdir(parents=True)
+        (self.repo / "compliance/riscv-target/rv32i-pipeline").mkdir(parents=True)
+        (self.repo / "obj_dir_lockstep").mkdir()
+        shutil.copy2(ROOT / "tools/run_lockstep.sh", self.repo / "tools/run_lockstep.sh")
+        (self.repo / "tools/reference_versions.env").write_text(
+            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED_CASES=1\nSPIKE_SHA=" + "b" * 40 + "\n"
+        )
+        for path in (self.repo / "compliance/link/spike-lockstep.ld",
+                     self.repo / "compliance/elf2hex.py",
+                     self.repo / "tools/lockstep.py"):
+            path.write_text("")
+        self.sim = self.repo / "obj_dir_lockstep/Vcpu"
+        self.sim.write_text("#!/usr/bin/env bash\nexit 0\n")
+        self.sim.chmod(0o755)
+        self.spike_repo = self.work / "spike-repo"
+        (self.spike_repo / "build").mkdir(parents=True)
+        self.spike = self.spike_repo / "build/spike"
+        self.spike.write_text("#!/usr/bin/env bash\nexit 0\n")
+        self.spike.chmod(0o755)
+        self.bin = self.work / "bin"
+        self.bin.mkdir()
+        self.write_tool("git", f"""
+if [ "${{4:-}}" = --show-toplevel ]; then
+    printf '%s\\n' {self.spike_repo!s}
+elif [ "${{2:-}}" = {self.spike_repo!s} ]; then
+    printf '%s\\n' "${{FAKE_SPIKE_SHA:-{'b' * 40}}}"
+else
+    printf '%s\\n' "${{FAKE_GIT_SHA:-{'a' * 40}}}"
+fi
+""")
+        self.write_tool("riscv64-unknown-elf-gcc", "touch \"${@: -1}\"\n")
+        self.write_tool("python3", "exit \"${FAKE_PYTHON_RC:-0}\"\n")
+        self.env = os.environ.copy()
+        self.env.update({
+            "ARCH_TEST": str(self.arch),
+            "PATH": str(self.bin) + os.pathsep + self.env["PATH"],
+            "REAL_PYTHON": sys.executable,
+            "LOCKSTEP_TIMEOUT": "0.25",
+            "SPIKE": str(self.spike),
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_tool(self, name, body):
+        path = self.bin / name
+        path.write_text("#!/usr/bin/env bash\nset -eu\n" + body)
+        path.chmod(0o755)
+
+    def run_wrapper(self):
+        return subprocess.run(
+            [str(self.repo / "tools/run_lockstep.sh")], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=5,
+        )
+
+    def test_zero_discovered_lockstep_cases_is_a_failure(self):
+        result = self.run_wrapper()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("error: no lockstep sources discovered", result.stdout + result.stderr)
+
+    def test_case_failure_is_counted_and_deadline_is_forwarded(self):
+        (self.src_dir / "case.S").write_text("nop\n")
+        args_file = self.work / "lockstep.args"
+        self.env["FAKE_LOCKSTEP_ARGS"] = str(args_file)
+        self.write_tool("python3", """
+if [ "${1##*/}" = lockstep.py ]; then
+    printf '%s\\n' "$*" > "$FAKE_LOCKSTEP_ARGS"
+    echo 'deadline expired in fake lockstep' >&2
+    exit 9
+fi
+if [ "${1##*/}" = elf2hex.py ]; then : > "$3"; : > "$4"; exit 0; fi
+exec "$REAL_PYTHON" "$@"
+""")
+        result = self.run_wrapper()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("0/1 programs match", result.stdout + result.stderr)
+        self.assertIn("deadline expired in fake lockstep", result.stdout + result.stderr)
+        self.assertIn("--timeout 0.25", args_file.read_text())
+
+
+class SoakLockstepWrapperTest(unittest.TestCase):
+    """Require every requested random seed to produce a complete result."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-soak-lockstep-wrapper-")
+        self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        (self.repo / "tools").mkdir(parents=True)
+        (self.repo / "compliance/link").mkdir(parents=True)
+        (self.repo / "obj_dir_lockstep").mkdir()
+        shutil.copy2(ROOT / "tools/soak_lockstep.sh", self.repo / "tools/soak_lockstep.sh")
+        for path in (self.repo / "tools/rand_gen.py", self.repo / "tools/lockstep.py",
+                     self.repo / "compliance/elf2hex.py",
+                     self.repo / "compliance/link/spike-lockstep.ld"):
+            path.write_text("")
+        (self.repo / "tools/reference_versions.env").write_text(
+            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED_CASES=38\nSPIKE_SHA=" + "b" * 40 + "\n"
+        )
+        self.sim = self.repo / "obj_dir_lockstep/Vcpu"
+        self.sim.write_text("#!/usr/bin/env bash\nexit 0\n")
+        self.sim.chmod(0o755)
+        self.spike_repo = self.work / "spike-repo"
+        (self.spike_repo / "build").mkdir(parents=True)
+        self.spike = self.spike_repo / "build/spike"
+        self.spike.write_text("#!/usr/bin/env bash\nexit 0\n")
+        self.spike.chmod(0o755)
+        self.bin = self.work / "bin"
+        self.bin.mkdir()
+        self.args_file = self.work / "lockstep.args"
+        self.write_tool("riscv64-unknown-elf-gcc", """
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = -o ]; then touch "$2"; exit 0; fi
+    shift
+done
+exit 2
+""")
+        self.write_tool("git", f"""
+if [ "${{4:-}}" = --show-toplevel ]; then
+    printf '%s\\n' {self.spike_repo!s}
+else
+    printf '%s\\n' "${{FAKE_SPIKE_SHA:-{'b' * 40}}}"
+fi
+""")
+        self.write_tool("python3", """
+case "${1##*/}" in
+    rand_gen.py)
+        [ "${FAKE_RANDOM_RC:-0}" -eq 0 ] || exit "$FAKE_RANDOM_RC"
+        printf 'nop\\n' > "${@: -1}" ;;
+    elf2hex.py)
+        [ "${FAKE_ELF2HEX_RC:-0}" -eq 0 ] || exit "$FAKE_ELF2HEX_RC"
+        : > "$3"; : > "$4" ;;
+    lockstep.py)
+        printf '%s\\n' "$*" > "$FAKE_LOCKSTEP_ARGS"
+        echo 'deadline expired in fake random lockstep' >&2
+        exit "${FAKE_LOCKSTEP_RC:-0}" ;;
+    *) exec "$REAL_PYTHON" "$@" ;;
+esac
+""")
+        self.env = os.environ.copy()
+        self.env.update({
+            "PATH": str(self.bin) + os.pathsep + self.env["PATH"],
+            "REAL_PYTHON": sys.executable,
+            "FAKE_LOCKSTEP_ARGS": str(self.args_file),
+            "LOCKSTEP_TIMEOUT": "0.25",
+            "SPIKE": str(self.spike),
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_tool(self, name, body):
+        path = self.bin / name
+        path.write_text("#!/usr/bin/env bash\nset -eu\n" + body)
+        path.chmod(0o755)
+
+    def run_wrapper(self, seeds):
+        return subprocess.run(
+            [str(self.repo / "tools/soak_lockstep.sh"), str(seeds), "5"],
+            cwd=self.repo, env=self.env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=5,
+        )
+
+    def test_zero_requested_random_cases_is_a_failure(self):
+        result = self.run_wrapper(0)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("error: SEEDS must be a positive integer", result.stdout + result.stderr)
+
+    def test_random_generation_failure_is_counted(self):
+        self.env["FAKE_RANDOM_RC"] = "6"
+        result = self.run_wrapper(1)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL seed=1 (random generation error", result.stdout + result.stderr)
+        self.assertIn("0/1 random seeds", result.stdout + result.stderr)
+
+    def test_elf2hex_failure_is_counted(self):
+        self.env["FAKE_ELF2HEX_RC"] = "7"
+        result = self.run_wrapper(1)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL seed=1 (elf2hex error", result.stdout + result.stderr)
+        self.assertIn("0/1 random seeds", result.stdout + result.stderr)
+
+    def test_lockstep_deadline_failure_is_counted_and_forwarded(self):
+        self.env["FAKE_LOCKSTEP_RC"] = "9"
+        result = self.run_wrapper(1)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("deadline expired in fake random lockstep", result.stdout + result.stderr)
+        self.assertIn("0/1 random seeds", result.stdout + result.stderr)
+        self.assertIn("--timeout 0.25", self.args_file.read_text())
 
 
 if __name__ == "__main__":

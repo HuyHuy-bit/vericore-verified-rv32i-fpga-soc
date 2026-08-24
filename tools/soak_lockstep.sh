@@ -1,65 +1,131 @@
 #!/usr/bin/env bash
-# soak_lockstep.sh [seeds] [instrs] — random programs compared against Spike,
-# retirement by retirement.
-#
-# This is tools/soak.sh's constrained-random generation pointed at a real ISA
-# implementation instead of the Python model in tools/rv32i_model.py. That
-# swap is the whole point: the model can't interpret branches or jumps, so
-# soak.sh has to generate straight-line code only, and "1000/1000 seeds pass"
-# has never said anything about control flow. Spike has no such limit, so
-# this flow generates branches and jumps too.
-#
-# It also compares differently. soak.sh checks final register state; this
-# compares every retirement's PC, instruction, and register write, so a wrong
-# value on a wrong path is caught at the instruction that produced it rather
-# than being masked by whatever overwrites it later - the same reason the
-# compliance suite got a lockstep flow on top of its signature check.
-set -u
+# Generate random programs and require complete Spike/RTL lockstep per seed.
+set -u -o pipefail
 
 SEEDS="${1:-50}"
 INSTRS="${2:-60}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" \
+    || { echo "error: cannot resolve repository root" >&2; exit 1; }
 SIM="${SIM:-$ROOT/obj_dir_lockstep/Vcpu}"
+SPIKE="${SPIKE:-$HOME/projects/riscv-isa-sim/build/spike}"
+SPIKE="${SPIKE/#\~/$HOME}"
 CYCLES="${CYCLES:-4000}"
-WORK="${TMPDIR:-/tmp}/rv32i_soak_lockstep"
-mkdir -p "$WORK"
+LOCKSTEP_TIMEOUT="${LOCKSTEP_TIMEOUT:-300}"
+VERSION_FILE="$ROOT/tools/reference_versions.env"
+WORK_DIR=""
 
-if [ ! -x "$SIM" ]; then
-    echo "error: $SIM not built - run 'make lockstep-sim' first" >&2
+die() {
+    echo "error: $*" >&2
     exit 1
-fi
+}
 
-PASS=0; FAIL=0; FAILED=()
+cleanup() {
+    local status=$?
+    if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+        if [ "$status" -eq 0 ] && [ "${KEEP_WORK:-0}" != 1 ]; then
+            rm -rf "$WORK_DIR"
+        else
+            echo "diagnostics retained in $WORK_DIR" >&2
+        fi
+    fi
+}
+trap cleanup EXIT
+
+load_spike_pin() {
+    local line key value seen_spike=0
+    [ -f "$VERSION_FILE" ] || die "reference version file missing: $VERSION_FILE"
+    [ -r "$VERSION_FILE" ] || die "reference version file unreadable: $VERSION_FILE"
+    SPIKE_SHA=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in '' | \#*) continue ;; esac
+        if [[ ! "$line" =~ ^([A-Z_][A-Z0-9_]*)=([^[:space:]#]+)$ ]]; then
+            die "malformed reference version metadata: $VERSION_FILE"
+        fi
+        key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+        case "$key" in
+            SPIKE_SHA)
+                [ "$seen_spike" -eq 0 ] || die "duplicate reference version key: $key"
+                SPIKE_SHA="$value"; seen_spike=1 ;;
+            ARCH_TEST_SHA | ARCH_TEST_EXPECTED_CASES) ;;
+            *) die "malformed reference version metadata: unknown key $key" ;;
+        esac
+    done < "$VERSION_FILE"
+    [[ "$SPIKE_SHA" =~ ^[0-9a-f]{40}$ ]] \
+        || die "malformed reference version metadata: SPIKE_SHA"
+}
+
+[[ "$SEEDS" =~ ^[1-9][0-9]*$ ]] || die "SEEDS must be a positive integer"
+[[ "$INSTRS" =~ ^[1-9][0-9]*$ ]] || die "INSTRS must be a positive integer"
+[[ "$CYCLES" =~ ^[1-9][0-9]*$ ]] || die "CYCLES must be a positive integer"
+[[ "$LOCKSTEP_TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+    || die "LOCKSTEP_TIMEOUT must be a positive number"
+command -v git >/dev/null 2>&1 || die "required tool not found: git"
+command -v python3 >/dev/null 2>&1 || die "required tool not found: python3"
+command -v riscv64-unknown-elf-gcc >/dev/null 2>&1 \
+    || die "required tool not found: riscv64-unknown-elf-gcc"
+[ -x "$SIM" ] || die "simulator is not executable: $SIM"
+[ -x "$SPIKE" ] || die "Spike is not executable: $SPIKE"
+[ -f "$ROOT/tools/rand_gen.py" ] || die "random generator missing"
+[ -f "$ROOT/compliance/link/spike-lockstep.ld" ] || die "lockstep linker script missing"
+[ -f "$ROOT/compliance/elf2hex.py" ] || die "elf2hex converter missing"
+[ -f "$ROOT/tools/lockstep.py" ] || die "lockstep comparator missing"
+load_spike_pin
+
+spike_repo=$(git -C "$(dirname "$SPIKE")" rev-parse --show-toplevel 2>/dev/null) \
+    || die "cannot determine Spike checkout for $SPIKE"
+spike_sha=$(git -C "$spike_repo" rev-parse HEAD 2>/dev/null) \
+    || die "cannot determine Spike checkout SHA: $spike_repo"
+[ "$spike_sha" = "$SPIKE_SHA" ] \
+    || die "Spike checkout SHA mismatch: expected $SPIKE_SHA, got $spike_sha"
+
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-soak-lockstep.XXXXXX") \
+    || die "could not create random lockstep directory"
+PASS=0
+FAIL=0
+FAILED=()
+
 for seed in $(seq 1 "$SEEDS"); do
-    asm="$WORK/s$seed.S"
-    elf="$WORK/s$seed.elf"
+    case_dir="$WORK_DIR/s$seed"
+    mkdir -p "$case_dir"
+    asm="$case_dir/s$seed.S"
+    elf="$case_dir/s$seed.elf"
+    instr_hex="$case_dir/s$seed.instr.hex"
+    data_hex="$case_dir/s$seed.data.hex"
 
-    python3 "$ROOT/tools/rand_gen.py" -n "$INSTRS" --seed "$seed" --spike "$asm" 2>/dev/null
+    if ! python3 "$ROOT/tools/rand_gen.py" -n "$INSTRS" --seed "$seed" --spike \
+            "$asm" > "$case_dir/generate.log" 2>&1; then
+        echo "FAIL seed=$seed (random generation error - see $case_dir/generate.log)"
+        FAIL=$((FAIL + 1)); FAILED+=("$seed (generate)"); continue
+    fi
 
     if ! riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -static -mcmodel=medany \
             -fvisibility=hidden -nostdlib -nostartfiles \
             -T "$ROOT/compliance/link/spike-lockstep.ld" \
-            "$asm" -o "$elf" 2> "$WORK/s$seed.cc.log"; then
-        echo "FAIL seed=$seed (compile - see $WORK/s$seed.cc.log)"
-        FAIL=$((FAIL+1)); FAILED+=("$seed"); continue
+            "$asm" -o "$elf" 2> "$case_dir/compile.log"; then
+        echo "FAIL seed=$seed (compile error - see $case_dir/compile.log)"
+        FAIL=$((FAIL + 1)); FAILED+=("$seed (compile)"); continue
     fi
 
-    python3 "$ROOT/compliance/elf2hex.py" "$elf" \
-        "$WORK/s$seed.instr.hex" "$WORK/s$seed.data.hex" > /dev/null || {
-        echo "FAIL seed=$seed (elf2hex)"; FAIL=$((FAIL+1)); FAILED+=("$seed"); continue; }
+    if ! python3 "$ROOT/compliance/elf2hex.py" "$elf" "$instr_hex" "$data_hex" \
+            > "$case_dir/elf2hex.log" 2>&1; then
+        echo "FAIL seed=$seed (elf2hex error - see $case_dir/elf2hex.log)"
+        FAIL=$((FAIL + 1)); FAILED+=("$seed (elf2hex)"); continue
+    fi
 
-    if python3 "$ROOT/tools/lockstep.py" "$elf" \
-           "$WORK/s$seed.instr.hex" "$WORK/s$seed.data.hex" \
-           --sim "$SIM" --cycles "$CYCLES" -q > "$WORK/s$seed.log" 2>&1; then
-        PASS=$((PASS+1))
+    if SPIKE="$SPIKE" python3 "$ROOT/tools/lockstep.py" "$elf" "$instr_hex" \
+            "$data_hex" --sim "$SIM" --cycles "$CYCLES" \
+            --timeout "$LOCKSTEP_TIMEOUT" -q > "$case_dir/lockstep.log" 2>&1; then
+        PASS=$((PASS + 1))
     else
-        FAIL=$((FAIL+1)); FAILED+=("$seed")
-        echo "FAIL seed=$seed - reproduce: $asm / $elf, divergence in $WORK/s$seed.log"
-        cat "$WORK/s$seed.log"
+        FAIL=$((FAIL + 1)); FAILED+=("$seed (lockstep)")
+        echo "FAIL seed=$seed (lockstep error - see $case_dir/lockstep.log)"
+        cat "$case_dir/lockstep.log"
     fi
 done
 
-echo ""
-echo "========== $PASS/$((PASS+FAIL)) random seeds match Spike (instrs=$INSTRS) =========="
-[ ${#FAILED[@]} -gt 0 ] && echo "Diverged seeds: ${FAILED[*]}"
-[ "$FAIL" -eq 0 ]
+echo
+echo "========== $PASS/$SEEDS random seeds match Spike (instrs=$INSTRS) =========="
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "Failed seeds: ${FAILED[*]}"
+fi
+[ "$FAIL" -eq 0 ] && [ "$PASS" -eq "$SEEDS" ]
