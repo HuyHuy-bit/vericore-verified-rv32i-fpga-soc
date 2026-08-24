@@ -6,6 +6,7 @@ They intentionally exercise the simulator CLI rather than its implementation.
 """
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -264,7 +265,7 @@ class HarnessTest(unittest.TestCase):
 
 
 class ComplianceRunnerTest(unittest.TestCase):
-    """Exercise the compliance runner with a one-case, fake toolchain."""
+    """Exercise a copied runner in an isolated, one-case mini-repository."""
 
     PINNED_ARCH_SHA = REFERENCE_VERSIONS["ARCH_TEST_SHA"]
     PINNED_SPIKE_SHA = REFERENCE_VERSIONS["SPIKE_SHA"]
@@ -272,6 +273,9 @@ class ComplianceRunnerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-compliance-fixture-")
         self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        self.runner = self.repo / "compliance/run_compliance.sh"
+        self.versions = self.repo / "tools/reference_versions.env"
         self.arch = self.work / "riscv-arch-test"
         self.src_dir = self.arch / "riscv-test-suite/rv32i_m/I/src"
         self.ref_dir = self.arch / "riscv-test-suite/rv32i_m/I/references"
@@ -282,19 +286,24 @@ class ComplianceRunnerTest(unittest.TestCase):
         self.src.write_text("nop\n")
         self.ref = self.ref_dir / "case.reference_output"
         self.ref.write_text("00000000\n")
-        self.versions = self.work / "reference_versions.env"
+        (self.repo / "compliance/link").mkdir(parents=True)
+        (self.repo / "compliance/riscv-target/rv32i-pipeline").mkdir(parents=True)
+        (self.repo / "tools").mkdir()
+        (self.repo / "obj_dir").mkdir()
+        shutil.copy2(ROOT / "compliance/run_compliance.sh", self.runner)
+        (self.repo / "compliance/link/rv32i-pipeline.ld").write_text("SECTIONS {}")
+        (self.repo / "compliance/elf2hex.py").write_text("# fake converter\n")
+        (self.repo / "compliance/riscv-target/rv32i-pipeline/model_test.h").write_text("")
         self.write_versions()
 
         self.bin_dir = self.work / "bin"
         self.bin_dir.mkdir()
-        self.sim = self.bin_dir / "fake-sim"
+        self.sim = self.repo / "obj_dir/Vcpu"
         self.write_tools()
         self.env = os.environ.copy()
         self.env.update({
             "ARCH_TEST": str(self.arch),
-            "REPO_ROOT": str(ROOT),
-            "REFERENCE_VERSIONS": str(self.versions),
-            "SIM": str(self.sim),
+            "REPO_ROOT": str(self.repo),
             "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
             "REAL_PYTHON": sys.executable,
             "FAKE_GIT_SHA": self.PINNED_ARCH_SHA,
@@ -347,6 +356,7 @@ exec /usr/bin/diff "$@"
 """)
         self.write(self.sim, """#!/usr/bin/env bash
 set -eu
+[ -z "${FAKE_SIM_MARKER:-}" ] || : > "$FAKE_SIM_MARKER"
 sig=
 for arg in "$@"; do
     case "$arg" in +SIGFILE=*) sig="${arg#'+SIGFILE='}" ;; esac
@@ -360,7 +370,7 @@ fi
 
     def run_runner(self):
         return subprocess.run(
-            [str(ROOT / "compliance/run_compliance.sh")], cwd=ROOT, env=self.env,
+            [str(self.runner)], cwd=self.repo, env=self.env,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
         )
 
@@ -372,7 +382,7 @@ fi
     # Each test names a preflight or case-result branch that a permissive
     # runner would turn into a zero-status compliance result.
     def test_compliance_rejects_missing_version_metadata(self):
-        self.env["REFERENCE_VERSIONS"] = str(self.work / "missing.env")
+        self.versions.unlink()
         self.assert_runner_failure("error: reference version file missing")
 
     def test_compliance_rejects_malformed_version_metadata(self):
@@ -387,6 +397,54 @@ fi
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         )
         self.assert_runner_failure("error: duplicate reference version key: ARCH_TEST_SHA")
+
+    def test_compliance_ignores_noncentral_version_override(self):
+        self.write_versions(
+            f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
+            "ARCH_TEST_EXPECTED_CASES=2\n"
+            f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
+        )
+        attacker_versions = self.work / "attacker.env"
+        attacker_versions.write_text(
+            f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
+            "ARCH_TEST_EXPECTED_CASES=1\n"
+            f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
+        )
+        self.env["REFERENCE_VERSIONS"] = str(attacker_versions)
+        marker = self.work / "simulator-ran"
+        self.env["FAKE_SIM_MARKER"] = str(marker)
+        self.assert_runner_failure("error: discovered 1 cases; expected 2")
+        self.assertFalse(marker.exists(), "noncentral one-case metadata ran the simulator")
+
+    def test_compliance_stops_count_mismatch_before_simulation(self):
+        self.write_versions(
+            f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
+            "ARCH_TEST_EXPECTED_CASES=2\n"
+            f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
+        )
+        marker = self.work / "simulator-ran"
+        self.env["FAKE_SIM_MARKER"] = str(marker)
+        self.assert_runner_failure("error: discovered 1 cases; expected 2")
+        self.assertFalse(marker.exists(), "simulator ran despite population preflight failure")
+
+    def test_compliance_reports_disjoint_missing_reference_categories(self):
+        self.ref.unlink()
+        self.assert_runner_failure("FAIL  case (missing reference file)")
+        result = self.run_runner()
+        self.assertIn(
+            "discovered=1 passed=0 failed=0 skipped/missing=1 infrastructure=1",
+            result.stdout + result.stderr,
+        )
+
+    def test_compliance_rejects_missing_git_tool(self):
+        no_git = self.work / "no-git-bin"
+        no_git.mkdir()
+        for name in ("riscv64-unknown-elf-gcc", "riscv64-unknown-elf-nm", "python3", "diff"):
+            (no_git / name).symlink_to(self.bin_dir / name)
+        (no_git / "bash").symlink_to("/bin/bash")
+        (no_git / "dirname").symlink_to("/usr/bin/dirname")
+        self.env["PATH"] = str(no_git)
+        self.assert_runner_failure("error: required tool not found: git")
 
     def test_compliance_rejects_simulator_crash_with_stale_signature(self):
         self.env["FAKE_SIM_MODE"] = "crash"
@@ -419,7 +477,7 @@ fi
     def test_compliance_accepts_a_fresh_matching_signature(self):
         result = self.run_runner()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("discovered=1 passed=1 failed=0 skipped/missing=0",
+        self.assertIn("discovered=1 passed=1 failed=0 skipped/missing=0 infrastructure=0",
                       result.stdout + result.stderr)
 
 

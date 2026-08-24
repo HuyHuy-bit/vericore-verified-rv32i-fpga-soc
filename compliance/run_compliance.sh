@@ -2,13 +2,16 @@
 # Run the pinned RV32I architecture-test signature suite strictly.
 set -u -o pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" \
+    || { echo "error: cannot resolve compliance runner location" >&2; exit 1; }
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)" \
+    || { echo "error: cannot resolve repository root" >&2; exit 1; }
 ARCH_TEST="${ARCH_TEST:-$HOME/riscv-arch-test}"
 ARCH_TEST="${ARCH_TEST/#\~/$HOME}"
-REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 COMPLIANCE="$REPO_ROOT/compliance"
-SIM="${SIM:-$REPO_ROOT/obj_dir/Vcpu}"
+SIM="$REPO_ROOT/obj_dir/Vcpu"
 CYCLES="${CYCLES:-2000}"
-VERSION_FILE="${REFERENCE_VERSIONS:-$REPO_ROOT/tools/reference_versions.env}"
+VERSION_FILE="$REPO_ROOT/tools/reference_versions.env"
 
 SRC_DIR="$ARCH_TEST/riscv-test-suite/rv32i_m/I/src"
 REF_DIR="$ARCH_TEST/riscv-test-suite/rv32i_m/I/references"
@@ -77,6 +80,7 @@ require_tool riscv64-unknown-elf-gcc
 require_tool riscv64-unknown-elf-nm
 require_tool python3
 require_tool diff
+require_tool git
 [ -x "$SIM" ] || die "simulator is not executable: $SIM"
 [ -d "$SRC_DIR" ] || die "architecture-test source tree missing: $SRC_DIR"
 [ -d "$REF_DIR" ] || die "architecture-test reference tree missing: $REF_DIR"
@@ -89,16 +93,19 @@ checkout_sha=$(git -C "$ARCH_TEST" rev-parse HEAD 2>/dev/null) \
 [ "$checkout_sha" = "$ARCH_TEST_SHA" ] \
     || die "architecture test checkout SHA mismatch: expected $ARCH_TEST_SHA, got $checkout_sha"
 
-WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-compliance.XXXXXX") \
-    || die "could not create compliance run directory"
-
 mapfile -d '' -t SOURCES < <(find "$SRC_DIR" -maxdepth 1 -type f -name '*.S' -print0 | sort -z)
 DISCOVERED=${#SOURCES[@]}
 [ "$DISCOVERED" -gt 0 ] || die "no compliance sources discovered in $SRC_DIR"
+[ "$DISCOVERED" -eq "$ARCH_TEST_EXPECTED_CASES" ] \
+    || die "discovered $DISCOVERED cases; expected $ARCH_TEST_EXPECTED_CASES"
+
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-compliance.XXXXXX") \
+    || die "could not create compliance run directory"
 
 PASS=0
 FAIL=0
 SKIPPED=0
+INFRA_FAILURES=0
 FAILED_TESTS=()
 
 for src in "${SOURCES[@]}"; do
@@ -113,7 +120,8 @@ for src in "${SOURCES[@]}"; do
 
     if [ ! -f "$ref" ]; then
         echo "FAIL  $name (missing reference file)"
-        FAIL=$((FAIL + 1)); SKIPPED=$((SKIPPED + 1)); FAILED_TESTS+=("$name (missing reference)")
+        SKIPPED=$((SKIPPED + 1)); INFRA_FAILURES=$((INFRA_FAILURES + 1))
+        FAILED_TESTS+=("$name (missing reference)")
         continue
     fi
 
@@ -183,15 +191,10 @@ for src in "${SOURCES[@]}"; do
     fi
 done
 
-if [ "$DISCOVERED" -ne "$ARCH_TEST_EXPECTED_CASES" ]; then
-    echo "FAIL  discovered $DISCOVERED cases; expected $ARCH_TEST_EXPECTED_CASES"
-    FAIL=$((FAIL + 1)); FAILED_TESTS+=("discovery count")
-fi
-
 echo
-echo "========== discovered=$DISCOVERED passed=$PASS failed=$FAIL skipped/missing=$SKIPPED =========="
+echo "========== discovered=$DISCOVERED passed=$PASS failed=$FAIL skipped/missing=$SKIPPED infrastructure=$INFRA_FAILURES =========="
 if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo "Failed: ${FAILED_TESTS[*]}"
 fi
 
-[ "$FAIL" -eq 0 ] && [ "$SKIPPED" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED_CASES" ]
+[ "$FAIL" -eq 0 ] && [ "$INFRA_FAILURES" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED_CASES" ]
