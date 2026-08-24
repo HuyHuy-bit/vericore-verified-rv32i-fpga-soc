@@ -380,6 +380,17 @@ module control_tb;
                 endcase
             end
 
+            check_csr("CSRRS register rs1=x0",
+                      {12'h305, 5'd0, F3_CSRRS, 5'd4, OPCODE_SYSTEM}, 1'b1);
+            check_csr("CSRRC register rs1=x0",
+                      {12'h305, 5'd0, F3_CSRRC, 5'd4, OPCODE_SYSTEM}, 1'b1);
+            check_csr("CSRRWI immediate uimm=0",
+                      {12'h305, 5'd0, F3_CSRRWI, 5'd4, OPCODE_SYSTEM}, 1'b0);
+            check_csr("CSRRSI immediate uimm=0",
+                      {12'h305, 5'd0, F3_CSRRSI, 5'd4, OPCODE_SYSTEM}, 1'b0);
+            check_csr("CSRRCI immediate uimm=0",
+                      {12'h305, 5'd0, F3_CSRRCI, 5'd4, OPCODE_SYSTEM}, 1'b0);
+
             check_outputs("ECALL", INSTR_ECALL,
                           1'b0, 1'b0, 1'b0,
                           1'b0, 1'b0, 1'b0, 1'b0, 1'b0,
@@ -402,6 +413,8 @@ module control_tb;
             check_illegal("SYSTEM-000 other immediate", 32'h1230_0073);
             check_illegal("ECALL with nonzero rd", 32'h0000_00f3);
             check_illegal("EBREAK with nonzero rs1", 32'h0010_8073);
+            check_illegal("MRET with nonzero rd", 32'h3020_00f3);
+            check_illegal("MRET with nonzero rs1", 32'h3020_8073);
         end
     endtask
 
