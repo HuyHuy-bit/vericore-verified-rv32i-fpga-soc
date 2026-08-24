@@ -499,6 +499,7 @@ class LockstepTest(unittest.TestCase):
         self.data = self.write("case.data.hex", "")
         self.pidfile = self.work / "peer.pid"
         self.trace_arg = self.work / "trace-arg"
+        self.spike_marker = self.work / "spike-started"
         self.env = os.environ.copy()
         self.env.update({
             "SPIKE": str(self.spike),
@@ -506,6 +507,7 @@ class LockstepTest(unittest.TestCase):
             "FAKE_SPIKE_MODE": "equal",
             "FAKE_PIDFILE": str(self.pidfile),
             "FAKE_TRACE_ARG": str(self.trace_arg),
+            "FAKE_SPIKE_MARKER": str(self.spike_marker),
         })
         self.write_executable(self.sim, self.fake_simulator())
         self.write_executable(self.spike, self.fake_spike())
@@ -562,6 +564,7 @@ sys.exit(7 if mode == "crash" else 0)
         return f"""#!{sys.executable}
 import os, signal, sys, time
 mode = os.environ.get("FAKE_SPIKE_MODE", "equal")
+open(os.environ["FAKE_SPIKE_MARKER"], "w").write(str(os.getpid()))
 def emit(pc, insn, tail=""):
     print(f"core   0: 3 0x{{pc}} (0x{{insn}}){{tail}}", file=sys.stderr, flush=True)
 def emit_terminal_on_shutdown(signum, frame):
@@ -709,6 +712,8 @@ while True: time.sleep(1)
                 self.assertIn("--timeout must be finite and positive",
                               result.stdout + result.stderr)
                 self.assertFalse(self.trace_arg.exists(), "nonfinite deadline started children")
+                self.assertFalse(self.spike_marker.exists(),
+                                 "nonfinite deadline started Spike")
 
     def test_exact_terminal_inclusive_equality_uses_private_trace(self):
         shared = Path("/tmp/_rvfi.trace")
@@ -718,6 +723,7 @@ while True: time.sleep(1)
             result = self.run_lockstep()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("2 retirements match through terminal self-loop", result.stdout)
+            self.assertTrue(self.spike_marker.exists(), "fake Spike marker is not functional")
             trace_path = Path(self.trace_arg.read_text())
             self.assertNotEqual(trace_path, shared)
             self.assertIn("rv32i-lockstep-", str(trace_path))
