@@ -22,7 +22,12 @@ FAIL=0
 for seed in $(seq 1 "$SEEDS"); do
     hexf="$WORK/s$seed.hex"
     reff="$WORK/s$seed.ref"
-    python3 "$ROOT/tools/rand_gen.py" -n "$INSTRS" --seed "$seed" "$hexf" "$reff" 2>/dev/null
+    if ! python3 "$ROOT/tools/rand_gen.py" -n "$INSTRS" --seed "$seed" "$hexf" "$reff" \
+            > "$WORK/s$seed.generate.log" 2>&1; then
+        FAIL=$((FAIL+1))
+        echo "FAIL seed=$seed - random generation failed: $WORK/s$seed.generate.log"
+        continue
+    fi
     cycles=$(grep '^cycles=' "$reff" | cut -d= -f2)
 
     if "$SIM" +MEMFILE="$hexf" +REFFILE="$reff" +STOP=selfloop +CYCLES="$cycles" +VCD= > "$WORK/s$seed.log" 2>&1; then

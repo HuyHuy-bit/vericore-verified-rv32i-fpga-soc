@@ -116,11 +116,15 @@ coverage: assemble
 	    -GDCACHE_BYTES=4096 -GDCACHE_BLOCK_WORDS=4 -GDCACHE_WAYS=4 -GDCACHE_WRITE_BACK=1 \
 	    --Mdir $(COVDIR) --top-module $(TOP) $(CPU_SRCS) $(TB)
 	@rm -rf coverage && mkdir -p coverage
-	@for t in $(TESTS); do \
+	@FAIL=0; \
+	for t in $(TESTS); do \
 	    CYCS=$$(grep '^cycles=' tests/$$t.ref 2>/dev/null | cut -d= -f2); CYCS=$${CYCS:-25}; \
-	    ./$(COVDIR)/V$(TOP) +MEMFILE=tests/$$t.hex +REFFILE=tests/$$t.ref \
-	        +STOP=tohost +CYCLES=$$CYCS +VCD= +COVERAGE=coverage/$$t.dat > /dev/null; \
-	done
+	    if ! ./$(COVDIR)/V$(TOP) +MEMFILE=tests/$$t.hex +REFFILE=tests/$$t.ref \
+	        +STOP=tohost +CYCLES=$$CYCS +VCD= +COVERAGE=coverage/$$t.dat > /dev/null; then \
+	        echo "coverage simulation failed: $$t" >&2; FAIL=1; \
+	    fi; \
+	done; \
+	[ $$FAIL -eq 0 ]
 	verilator_coverage --write coverage/merged.dat coverage/*.dat
 	verilator_coverage --annotate coverage/annotated coverage/merged.dat
 	python3 tools/coverage_report.py coverage/merged.dat > docs/coverage.md

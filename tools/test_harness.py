@@ -265,6 +265,112 @@ class HarnessTest(unittest.TestCase):
         self.assertNotIn("PASS", result.stdout)
 
 
+class CoverageTargetTest(unittest.TestCase):
+    """Exercise the real coverage target's propagation of simulator failure."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-coverage-fixture-")
+        self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        self.repo.mkdir()
+        shutil.copy2(ROOT / "Makefile", self.repo / "Makefile")
+        shutil.copy2(ROOT / "cpu_tb.cpp", self.repo / "cpu_tb.cpp")
+        shutil.copytree(ROOT / "rtl", self.repo / "rtl")
+        shutil.copytree(ROOT / "tests", self.repo / "tests")
+        shutil.copytree(ROOT / "tools", self.repo / "tools")
+        (self.repo / "docs").mkdir()
+        self.bin_dir = self.work / "bin"
+        self.bin_dir.mkdir()
+        self.write_fake_tools()
+        self.env = os.environ.copy()
+        self.env["PATH"] = str(self.bin_dir) + os.pathsep + self.env["PATH"]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_executable(self, name, contents):
+        path = self.bin_dir / name
+        path.write_text(contents)
+        path.chmod(0o755)
+
+    def write_fake_tools(self):
+        self.write_executable("verilator", f"""#!{sys.executable}
+from pathlib import Path
+import sys
+out = Path(sys.argv[sys.argv.index("--Mdir") + 1])
+out.mkdir(parents=True, exist_ok=True)
+(out / "Vcpu").write_text('''#!{sys.executable}
+from pathlib import Path
+import sys
+for arg in sys.argv[1:]:
+    if arg.startswith("+MEMFILE=") and arg.endswith("t01_rtype.hex"):
+        sys.exit(7)
+    if arg.startswith("+COVERAGE="):
+        Path(arg.split("=", 1)[1]).write_text("coverage\\\\n")
+sys.exit(0)
+''')
+(out / "Vcpu").chmod(0o755)
+""")
+        self.write_executable("verilator_coverage", f"""#!{sys.executable}
+from pathlib import Path
+import sys
+if sys.argv[1] == "--write":
+    Path(sys.argv[2]).write_text("")
+elif sys.argv[1] == "--annotate":
+    Path(sys.argv[2]).mkdir(parents=True, exist_ok=True)
+""")
+
+    def test_coverage_fails_when_a_directed_simulation_fails(self):
+        result = subprocess.run(
+            ["make", "coverage"], cwd=self.repo, env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class SoakTargetTest(unittest.TestCase):
+    """Exercise the real soak wrapper's handling of generator failure."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-soak-fixture-")
+        self.work = Path(self.tmp.name)
+        self.repo = self.work / "repo"
+        (self.repo / "tools").mkdir(parents=True)
+        (self.repo / "obj_dir").mkdir()
+        shutil.copy2(ROOT / "tools/soak.sh", self.repo / "tools/soak.sh")
+        (self.repo / "tools/rand_gen.py").write_text("")
+        self.sim_marker = self.work / "simulator-ran"
+        self.sim = self.repo / "obj_dir/Vcpu"
+        self.sim.write_text("#!/usr/bin/env bash\ntouch \"$FAKE_SIM_MARKER\"\nexit 0\n")
+        self.sim.chmod(0o755)
+        self.bin_dir = self.work / "bin"
+        self.bin_dir.mkdir()
+        (self.bin_dir / "python3").write_text("#!/usr/bin/env bash\nexit 7\n")
+        (self.bin_dir / "python3").chmod(0o755)
+        self.soak_work = self.work / "rv32i_soak"
+        self.soak_work.mkdir()
+        (self.soak_work / "s1.hex").write_text("stale program\n")
+        (self.soak_work / "s1.ref").write_text("cycles=99\n")
+        self.env = os.environ.copy()
+        self.env.update({
+            "PATH": str(self.bin_dir) + os.pathsep + self.env["PATH"],
+            "TMPDIR": str(self.work),
+            "FAKE_SIM_MARKER": str(self.sim_marker),
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_soak_rejects_generator_failure_before_using_stale_seed_files(self):
+        result = subprocess.run(
+            [str(self.repo / "tools/soak.sh"), "1", "5"], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.sim_marker.exists(), result.stdout + result.stderr)
+
+
 class ComplianceRunnerTest(unittest.TestCase):
     """Exercise a copied runner in an isolated, one-case mini-repository."""
 
