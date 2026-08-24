@@ -2,9 +2,10 @@
 #
 # Each case loads its own expected PC and instruction word before executing a
 # raw illegal encoding.  The handler checks mcause/mepc/mtval, advances mepc by
-# exactly one instruction, and returns.  x12 increments immediately after each
-# fault, so an imprecise trap flush would execute a marker twice while a missing
-# trap or redirect would lose handler/progress counts.
+# exactly one instruction, poisons mcause away from 2, and returns.  x12
+# increments immediately after each fault, so an imprecise trap flush would
+# execute a marker twice while a missing trap or redirect would lose
+# handler/progress counts.
     la    x1, handler
     csrrw x0, mtvec, x1
 
@@ -13,9 +14,11 @@
     addi  x6, x0, 4
     addi  x10, x0, 2       # expected illegal-instruction cause
     addi  x13, x0, 85
-    sw    x13, 0(x0)       # invalid STORE must not alter this memory marker
+    sw    x13, 0(x0)       # address-0 memory sentinel
+    addi  x13, x0, 34      # invalid STORE attempts a distinguishable value
     addi  x19, x0, 91
-    csrrw x0, mscratch, x19 # invalid SYSTEM must not alter this CSR marker
+    csrrw x0, mscratch, x19 # mscratch sentinel
+    addi  x19, x0, 37      # x19=37 and its raw uimm=19 both differ from 91
     la    x20, alias_redirect
 
     # Seed trap state away from all first-case expectations.  Later cases use
@@ -182,4 +185,6 @@ metadata_failure:
 resume_fault:
     addi  x8, x8, 4
     csrrw x0, mepc, x8
+    addi  x7, x0, 7       # make a missing update on the next trap observable
+    csrrw x0, mcause, x7
     mret
