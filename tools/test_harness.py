@@ -18,6 +18,45 @@ TOHOST_PASS = "00100f93\n00010f37\nff0f0f13\n01ff2023\n0000006f\n"
 TOHOST_FAIL = "00200f93\n00010f37\nff0f0f13\n01ff2023\n0000006f\n"
 SELF_LOOP = "0000006f\n"
 WRONG_LOOP = "000000ef\n"
+LOAD_USE = """02a00093
+00102023
+00002103
+00110113
+06400193
+00302223
+00402203
+004202b3
+00500313
+0c800393
+00702423
+00802403
+00640433
+00100f93
+00010f37
+ff0f0f13
+01ff2023
+0000006f
+"""
+MEMORY = """02a00093
+00102023
+00002103
+fff00193
+00301223
+00401203
+00405283
+fff00313
+00600423
+00800383
+00804403
+06400493
+00902623
+00c02503
+00100f93
+00010f37
+ff0f0f13
+01ff2023
+0000006f
+"""
 
 
 class HarnessTest(unittest.TestCase):
@@ -32,6 +71,13 @@ class HarnessTest(unittest.TestCase):
         self.fail_hex = self.write("fail.hex", TOHOST_FAIL)
         self.loop_hex = self.write("loop.hex", SELF_LOOP)
         self.wrong_loop_hex = self.write("wrong-loop.hex", WRONG_LOOP)
+        self.load_use_hex = self.write("load-use.hex", LOAD_USE)
+        self.memory_hex = self.write("memory.hex", MEMORY)
+        self.valid_ref = self.write("valid.ref", "cycles=20\n")
+        self.memory_ref = self.write(
+            "memory.ref",
+            "cycles=20\nx2=42\nx4=0xFFFFFFFF\nx5=65535\nx7=0xFFFFFFFF\nx8=255\nx10=100\n",
+        )
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -86,21 +132,21 @@ class HarnessTest(unittest.TestCase):
 
     # These catch the old implicit/default plusarg behavior.
     def test_missing_run_mode_is_rejected(self):
-        result = self.invoke("+CYCLES=20", "+REFFILE=tests/t01_rtype.ref")
+        result = self.invoke("+CYCLES=20", f"+REFFILE={self.valid_ref}")
         self.assert_failure(result, "error: exactly one run mode is required")
 
     def test_unknown_run_mode_is_rejected(self):
-        result = self.invoke("+STOP=park", "+CYCLES=20", "+REFFILE=tests/t01_rtype.ref")
+        result = self.invoke("+STOP=park", "+CYCLES=20", f"+REFFILE={self.valid_ref}")
         self.assert_failure(result, "error: unknown stop mode: park")
 
     def test_duplicate_run_mode_is_rejected(self):
         result = self.invoke("+STOP=tohost", "+STOP=tohost", "+CYCLES=20",
-                          "+REFFILE=tests/t01_rtype.ref")
+                          f"+REFFILE={self.valid_ref}")
         self.assert_failure(result, "error: duplicate run mode")
 
     def test_mutually_exclusive_run_modes_are_rejected(self):
         result = self.invoke("+STOP=tohost", "+SNAPSHOT=1", "+CYCLES=20",
-                          "+REFFILE=tests/t01_rtype.ref")
+                          f"+REFFILE={self.valid_ref}")
         self.assert_failure(result, "error: mutually exclusive run modes")
 
     def test_snapshot_requires_an_explicit_cycle_count(self):
@@ -158,19 +204,29 @@ class HarnessTest(unittest.TestCase):
     def test_successful_tohost_reference_and_stalls_check(self):
         ref = self.write("valid.ref", "cycles=30\nstalls=3\nx1=42\nx8=205\n")
         result = subprocess.run(
-            [str(SIM), "+MEMFILE=tests/t07_load_use.hex", "+VCD=", "+STOP=tohost",
+            [str(SIM), f"+MEMFILE={self.load_use_hex}", "+VCD=", "+STOP=tohost",
              "+CYCLES=30", f"+REFFILE={ref}"],
             cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("PASS", result.stdout)
+        self.assertIn("PASS  stalls", result.stdout)
+
+    def test_mismatched_load_use_stalls_are_a_failure(self):
+        ref = self.write("wrong-stalls.ref", "cycles=30\nstalls=2\nx1=42\nx8=205\n")
+        result = subprocess.run(
+            [str(SIM), f"+MEMFILE={self.load_use_hex}", "+VCD=", "+STOP=tohost",
+             "+CYCLES=30", f"+REFFILE={ref}"],
+            cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=20,
+        )
+        self.assert_failure(result, "error: reference mismatch for stalls")
 
     def test_verification_cycle_budget_allows_directed_tohost_headroom(self):
         """The legacy reference value remains an explicit verified-run budget."""
         result = subprocess.run(
-            [str(SIM), "+MEMFILE=tests/t03_memory.hex", "+VCD=", "+STOP=tohost",
-             "+CYCLES=20", "+REFFILE=tests/t03_memory.ref"],
+            [str(SIM), f"+MEMFILE={self.memory_hex}", "+VCD=", "+STOP=tohost",
+             "+CYCLES=20", f"+REFFILE={self.memory_ref}"],
             cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=20,
         )
