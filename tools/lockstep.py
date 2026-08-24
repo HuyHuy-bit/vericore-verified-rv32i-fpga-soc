@@ -2,10 +2,12 @@
 """Run one ELF on Spike and RTL and compare complete retirement streams."""
 
 import argparse
+import math
 import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -37,9 +39,11 @@ def fmt(entry):
 def terminate_and_reap(proc):
     """Terminate a child, escalating if necessary, and always wait for it."""
     if proc is None:
-        return
+        return False
+    termination_requested = False
     if proc.poll() is None:
         proc.terminate()
+        termination_requested = True
         try:
             proc.wait(timeout=1)
         except subprocess.TimeoutExpired:
@@ -47,6 +51,7 @@ def terminate_and_reap(proc):
             proc.wait()
     else:
         proc.wait()
+    return termination_requested
 
 
 def read_diagnostic(path):
@@ -91,8 +96,8 @@ def parse_rtl_trace(trace_path):
             raise LockstepError(
                 f"malformed RTL trace record at line {lineno}: {line!r}"
             ) from exc
-        if pc > 0xFFFFFFFF or insn > 0xFFFFFFFF or not 0 <= rd <= 31 \
-                or wdata > 0xFFFFFFFF:
+        if not 0 <= pc <= 0xFFFFFFFF or not 0 <= insn <= 0xFFFFFFFF \
+                or not 0 <= rd <= 31 or not 0 <= wdata <= 0xFFFFFFFF:
             raise LockstepError(f"malformed RTL trace record at line {lineno}: {line!r}")
         trace.append((pc, insn, rd, wdata if rd else 0))
 
@@ -227,6 +232,7 @@ def run_children(args, work):
     deadline = time.monotonic() + args.timeout
     rtl = None
     failure = None
+    spike_terminated_by_us = False
     try:
         while True:
             parser.update()
@@ -234,11 +240,20 @@ def run_children(args, work):
             sim_status = sim.poll()
 
             if parser.complete and spike_status is None:
-                terminate_and_reap(spike)
+                try:
+                    spike_status = spike.wait(timeout=0.02)
+                except subprocess.TimeoutExpired:
+                    spike_terminated_by_us = terminate_and_reap(spike)
                 spike_status = spike.returncode
 
-            if spike_status is not None and not parser.complete:
-                failure = LockstepError(f"Spike exited with status {spike_status} before terminal self-loop")
+            intentional_spike_status = (
+                spike_terminated_by_us
+                and spike_status in (-signal.SIGTERM, -signal.SIGKILL)
+            )
+            if spike_status not in (None, 0) and not intentional_spike_status:
+                position = "after" if parser.complete else "before"
+                failure = LockstepError(
+                    f"Spike exited with status {spike_status} {position} terminal self-loop")
                 break
             if sim_status is not None and sim_status != 0:
                 failure = LockstepError(f"simulator exited with status {sim_status}")
@@ -288,8 +303,8 @@ def main():
     args = parser.parse_args()
     if args.cycles <= 0:
         parser.error("--cycles must be positive")
-    if args.timeout <= 0:
-        parser.error("--timeout must be positive")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
 
     name = os.path.basename(args.elf)
     work = Path(tempfile.mkdtemp(prefix="rv32i-lockstep-"))

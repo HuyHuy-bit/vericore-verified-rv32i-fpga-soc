@@ -550,8 +550,9 @@ records = {{
     "diverge0": "80000000 00200093 1 00000002\\n" + {self.RTL_END!r},
     "delayed_equal": {self.RTL_A + self.RTL_END!r},
 }}
-if records[mode] is not None:
-    open(trace, "w").write(records[mode])
+contents = os.environ.get("FAKE_RTL_TRACE", records[mode])
+if contents is not None:
+    open(trace, "w").write(contents)
 print("SIM-STDOUT-DETAIL")
 print("SIM-STDERR-DETAIL", file=sys.stderr)
 sys.exit(7 if mode == "crash" else 0)
@@ -577,6 +578,9 @@ if mode in ("hang", "timeout"):
 emit("80000000", "00100093", " x1  0x00000001")
 if mode == "prefix": emit("80000004", "00200113", " x2  0x00000002")
 if mode != "nonterminal": emit("80000008", "0000006f")
+if mode == "terminal_then_failure":
+    print("SPIKE-POST-TERMINAL-FAILURE", file=sys.stderr, flush=True)
+    sys.exit(12)
 if mode == "repeat_terminal":
     while True:
         time.sleep(0.02)
@@ -590,7 +594,7 @@ while True: time.sleep(1)
         return subprocess.run(
             [sys.executable, str(ROOT / "tools/lockstep.py"), str(self.elf),
              str(self.instr), str(self.data), "--sim", str(self.sim),
-             "--cycles", "10", "--timeout", timeout],
+             "--cycles", "10", f"--timeout={timeout}"],
             cwd=ROOT, env=self.env, text=True, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=5,
         )
@@ -669,6 +673,43 @@ while True: time.sleep(1)
         self.assertIn("SPIKE-CRASH-DETAIL", result.stdout + result.stderr)
         self.assert_recorded_peer_reaped()
 
+    def test_natural_spike_failure_after_terminal_is_rejected(self):
+        self.env["FAKE_SPIKE_MODE"] = "terminal_then_failure"
+        result = self.assert_lockstep_failure(
+            "Spike exited with status 12 after terminal self-loop")
+        self.assertIn("SPIKE-POST-TERMINAL-FAILURE", result.stdout + result.stderr)
+
+    def test_signed_rtl_fields_are_rejected_before_normalization(self):
+        for field, record in (
+            ("pc", "-1 00100093 1 00000001\n" + self.RTL_END),
+            ("insn", "80000000 -1 1 00000001\n" + self.RTL_END),
+            ("wdata", "80000000 00100093 1 -1\n" + self.RTL_END),
+            ("x0 wdata", self.RTL_A + "80000008 0000006f 0 -1\n"),
+        ):
+            with self.subTest(field=field):
+                self.env["FAKE_RTL_TRACE"] = record
+                self.assert_lockstep_failure("malformed RTL trace record")
+
+    def test_overflowed_rtl_fields_are_rejected(self):
+        for field, record in (
+            ("pc", "100000000 00100093 1 00000001\n" + self.RTL_END),
+            ("insn", "80000000 100000000 1 00000001\n" + self.RTL_END),
+            ("wdata", "80000000 00100093 1 100000000\n" + self.RTL_END),
+            ("rd", "80000000 00100093 32 00000001\n" + self.RTL_END),
+        ):
+            with self.subTest(field=field):
+                self.env["FAKE_RTL_TRACE"] = record
+                self.assert_lockstep_failure("malformed RTL trace record")
+
+    def test_nonfinite_deadlines_are_rejected_before_children_start(self):
+        for timeout in ("nan", "inf", "+inf", "-inf"):
+            with self.subTest(timeout=timeout):
+                result = self.run_lockstep(timeout=timeout)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("--timeout must be finite and positive",
+                              result.stdout + result.stderr)
+                self.assertFalse(self.trace_arg.exists(), "nonfinite deadline started children")
+
     def test_exact_terminal_inclusive_equality_uses_private_trace(self):
         shared = Path("/tmp/_rvfi.trace")
         old = shared.read_bytes() if shared.exists() else None
@@ -711,7 +752,8 @@ class LockstepWrapperTest(unittest.TestCase):
         (self.repo / "compliance/riscv-target/rv32i-pipeline").mkdir(parents=True)
         (self.repo / "obj_dir_lockstep").mkdir()
         shutil.copy2(ROOT / "tools/run_lockstep.sh", self.repo / "tools/run_lockstep.sh")
-        (self.repo / "tools/reference_versions.env").write_text(
+        self.versions = self.repo / "tools/reference_versions.env"
+        self.versions.write_text(
             "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED_CASES=1\nSPIKE_SHA=" + "b" * 40 + "\n"
         )
         for path in (self.repo / "compliance/link/spike-lockstep.ld",
@@ -737,7 +779,10 @@ else
     printf '%s\\n' "${{FAKE_GIT_SHA:-{'a' * 40}}}"
 fi
 """)
-        self.write_tool("riscv64-unknown-elf-gcc", "touch \"${@: -1}\"\n")
+        self.write_tool("riscv64-unknown-elf-gcc", """
+[ "${FAKE_GCC_RC:-0}" -eq 0 ] || exit "$FAKE_GCC_RC"
+touch "${@: -1}"
+""")
         self.write_tool("python3", "exit \"${FAKE_PYTHON_RC:-0}\"\n")
         self.env = os.environ.copy()
         self.env.update({
@@ -763,13 +808,22 @@ fi
             stderr=subprocess.PIPE, timeout=5,
         )
 
+    def add_source(self):
+        (self.src_dir / "case.S").write_text("nop\n")
+
+    def assert_wrapper_failure(self, diagnostic):
+        result = self.run_wrapper()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stdout + result.stderr)
+        return result
+
     def test_zero_discovered_lockstep_cases_is_a_failure(self):
         result = self.run_wrapper()
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("error: no lockstep sources discovered", result.stdout + result.stderr)
 
     def test_case_failure_is_counted_and_deadline_is_forwarded(self):
-        (self.src_dir / "case.S").write_text("nop\n")
+        self.add_source()
         args_file = self.work / "lockstep.args"
         self.env["FAKE_LOCKSTEP_ARGS"] = str(args_file)
         self.write_tool("python3", """
@@ -786,6 +840,27 @@ exec "$REAL_PYTHON" "$@"
         self.assertIn("0/1 programs match", result.stdout + result.stderr)
         self.assertIn("deadline expired in fake lockstep", result.stdout + result.stderr)
         self.assertIn("--timeout 0.25", args_file.read_text())
+
+    def test_architecture_compile_failure_is_counted(self):
+        self.add_source()
+        self.env["FAKE_GCC_RC"] = "6"
+        result = self.assert_wrapper_failure("FAIL  case (compile error")
+        self.assertIn("0/1 programs match", result.stdout + result.stderr)
+        self.assertIn("case (compile)", result.stdout + result.stderr)
+
+    def test_architecture_conversion_failure_is_counted(self):
+        self.add_source()
+        self.env["FAKE_PYTHON_RC"] = "7"
+        result = self.assert_wrapper_failure("FAIL  case (elf2hex error")
+        self.assertIn("0/1 programs match", result.stdout + result.stderr)
+        self.assertIn("case (elf2hex)", result.stdout + result.stderr)
+
+    def test_incomplete_architecture_population_is_rejected(self):
+        self.add_source()
+        self.versions.write_text(
+            "ARCH_TEST_SHA=" + "a" * 40
+            + "\nARCH_TEST_EXPECTED_CASES=2\nSPIKE_SHA=" + "b" * 40 + "\n")
+        self.assert_wrapper_failure("discovered 1 lockstep cases; expected 2")
 
 
 class SoakLockstepWrapperTest(unittest.TestCase):
@@ -818,6 +893,7 @@ class SoakLockstepWrapperTest(unittest.TestCase):
         self.bin.mkdir()
         self.args_file = self.work / "lockstep.args"
         self.write_tool("riscv64-unknown-elf-gcc", """
+[ "${FAKE_GCC_RC:-0}" -eq 0 ] || exit "$FAKE_GCC_RC"
 while [ "$#" -gt 0 ]; do
     if [ "$1" = -o ]; then touch "$2"; exit 0; fi
     shift
@@ -888,6 +964,14 @@ esac
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("FAIL seed=1 (elf2hex error", result.stdout + result.stderr)
         self.assertIn("0/1 random seeds", result.stdout + result.stderr)
+
+    def test_random_program_compile_failure_is_counted(self):
+        self.env["FAKE_GCC_RC"] = "8"
+        result = self.run_wrapper(1)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL seed=1 (compile error", result.stdout + result.stderr)
+        self.assertIn("0/1 random seeds", result.stdout + result.stderr)
+        self.assertIn("1 (compile)", result.stdout + result.stderr)
 
     def test_lockstep_deadline_failure_is_counted_and_forwarded(self):
         self.env["FAKE_LOCKSTEP_RC"] = "9"
