@@ -68,6 +68,7 @@ memtiming:
 # obj_dir_unit_* build directory by tools/run_unit.sh.
 unit:
 	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/control.sv unit/control_tb.sv
+	@tools/run_unit.sh hazard_detect_tb rtl/hazard_detect.sv unit/hazard_detect_tb.sv
 
 # Run every test and print a summary.
 test: sim assemble memtiming

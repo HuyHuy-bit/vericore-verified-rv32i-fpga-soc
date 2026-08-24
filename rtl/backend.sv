@@ -157,6 +157,7 @@ module backend #(
     hazard_detect u_hazard_detect (
         .mem_read_ex(id_ex_q.ctrl.mem_read), .rd_addr_ex(id_ex_q.rd_addr),
         .rs1_addr_id(rs1_addr_id), .rs2_addr_id(rs2_addr_id),
+        .uses_rs1_id(uses_rs1_id), .uses_rs2_id(uses_rs2_id),
         .stall(load_use_stall)
     );
 
