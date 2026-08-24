@@ -219,6 +219,8 @@ package rv32i_pkg;
         logic       is_system;
         logic       is_fencei;
         logic       illegal;
+        logic       uses_rs1;
+        logic       uses_rs2;
     } ctrl_t;
 
     typedef struct packed {

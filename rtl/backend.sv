@@ -55,29 +55,27 @@ module backend #(
 );
 
     // ID stage
-    logic [6:0] opcode_id, funct7_id;
     logic [2:0] funct3_id;
     logic [4:0] rs1_addr_id, rs2_addr_id, rd_addr_id;
-    assign opcode_id   = if_id_q.instr[6:0];
     assign rd_addr_id  = if_id_q.instr[11:7];
     assign funct3_id   = if_id_q.instr[14:12];
     assign rs1_addr_id = if_id_q.instr[19:15];
     assign rs2_addr_id = if_id_q.instr[24:20];
-    assign funct7_id   = if_id_q.instr[31:25];
 
     logic        reg_write_en_id, alu_src_id, mem_write_id, mem_read_id, branch_id, alu_a_src_id;
     logic [3:0]  alu_op_id;
     logic [1:0]  pc_src_id, wb_src_id;
     logic        is_csr_id, is_system_id, is_fencei_id, illegal_id;
+    logic        uses_rs1_id, uses_rs2_id;
 
     control u_control (
-        .opcode(opcode_id), .funct3(funct3_id), .funct7(funct7_id),
+        .instr(if_id_q.instr),
         .reg_write_en(reg_write_en_id), .alu_src(alu_src_id),
         .mem_write(mem_write_id), .mem_read(mem_read_id),
         .branch(branch_id), .pc_src(pc_src_id), .wb_src(wb_src_id),
         .alu_a_src(alu_a_src_id), .alu_op(alu_op_id),
         .is_csr(is_csr_id), .is_system(is_system_id), .is_fencei(is_fencei_id),
-        .illegal(illegal_id)
+        .illegal(illegal_id), .uses_rs1(uses_rs1_id), .uses_rs2(uses_rs2_id)
     );
 
     // CSR instruction operand fields (decoded in ID, used at commit in MEM).
@@ -137,6 +135,8 @@ module backend #(
         id_ex_d.ctrl.is_system    = is_system_id;
         id_ex_d.ctrl.is_fencei    = is_fencei_id;
         id_ex_d.ctrl.illegal      = illegal_id;
+        id_ex_d.ctrl.uses_rs1     = uses_rs1_id;
+        id_ex_d.ctrl.uses_rs2     = uses_rs2_id;
         id_ex_d.valid             = if_id_q.valid;
         id_ex_d.predicted_taken   = if_id_q.predicted_taken;
         id_ex_d.predicted_target  = if_id_q.predicted_target;

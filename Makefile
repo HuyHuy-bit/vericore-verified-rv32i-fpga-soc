@@ -41,7 +41,7 @@ ASM      = python3 tools/asm.py
 TESTS    = t01_rtype t02_itype t03_memory t04_branch t05_jump t06_lui_auipc t07_load_use t08_loop t09_trap_illegal t10_misaligned t11_mret t12_misaligned_fetch t13_csr_ext t14_csr_illegal t15_csr_unimpl t16_irq_timer t17_irq_mret t18_trap_causes t19_dcache_evict t20_ras_multi_caller t21_gshare_correlated t22_fencei
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
+.PHONY: all sim assemble test unit harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -63,6 +63,11 @@ memtiming:
 	@verilator --cc --exe --build -j 0 --top-module mem_timing -GLATENCY=10 \
 	    --Mdir obj_dir_memtiming rtl/rv32i_pkg.sv rtl/mem_timing.sv tb/mem_timing_tb.cpp > /dev/null
 	@./obj_dir_memtiming/Vmem_timing
+
+# Dependency-free SystemVerilog unit checks, each isolated in an ignored
+# obj_dir_unit_* build directory by tools/run_unit.sh.
+unit:
+	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/control.sv unit/control_tb.sv
 
 # Run every test and print a summary.
 test: sim assemble memtiming
