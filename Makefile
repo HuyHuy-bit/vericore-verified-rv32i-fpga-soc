@@ -46,7 +46,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test unit harness-test evidence-check check memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
+.PHONY: all sim assemble test unit harness-test evidence-check check memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -176,6 +176,13 @@ compliance: sim
 # is what lets them contain branches and jumps (see tools/soak_lockstep.sh).
 soak-lockstep: lockstep-sim
 	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/soak_lockstep.sh $(SEEDS)
+
+REPORT_DIR ?= syn/reports
+synth-matrix:
+	VIVADO="$(VIVADO)" python3 syn/run_synth.py --report-dir "$(REPORT_DIR)"
+
+synth-summary:
+	python3 syn/summarize_reports.py --report-dir "$(REPORT_DIR)"
 
 clean:
 	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov obj_dir_lockstep coverage tests/*.hex tests/*.vcd cpu.vcd

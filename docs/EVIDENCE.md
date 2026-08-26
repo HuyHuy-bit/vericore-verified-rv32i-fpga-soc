@@ -45,7 +45,7 @@ central reference metadata by `make evidence-check`.
 | Spike random lockstep | `make soak-lockstep SEEDS=200` | Pending final recorded rerun |
 | Functional coverage | `make coverage` | Tracked 34/38 report is historical; current 44-point rerun pending |
 | Benchmarks | Four specified memory/cache configurations | Pending final recorded rerun |
-| FPGA routes | Four 512-word Vivado 2025.2 configurations | Pending synthesis tooling and rerun |
+| FPGA routes | `make synth-matrix` and `make synth-summary`, four 512-word configurations | Pending final recorded rerun |
 
 ## Historical material
 

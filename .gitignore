@@ -10,3 +10,18 @@ compliance/*.sig.output
 # Output of the graphify tooling - a supplemental analysis artifact,
 # regenerated on demand and not part of the design.
 graphify-out/
+
+syn/reports/
+syn/.synth-reports-*/
+syn/.Xil/
+syn/*.xpr
+syn/*.dcp
+syn/*.jou
+syn/*.log
+syn/*.rpt
+syn/*.cache/
+syn/*.gen/
+syn/*.hw/
+syn/*.ip_user_files/
+syn/*.runs/
+syn/out_*/

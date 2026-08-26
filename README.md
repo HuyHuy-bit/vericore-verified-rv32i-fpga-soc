@@ -126,6 +126,8 @@ make coverage   # functional coverage report
 make soak SEEDS=1000            # random programs vs. the Python model
 make lockstep                  # compliance suite vs. Spike, per retirement
 make soak-lockstep SEEDS=200   # random programs vs. Spike, with control flow
+make synth-matrix              # four private Vivado 2025.2 routes
+make synth-summary             # validate reports and calculate fmax
 ```
 
 Cache geometry is a set of RTL parameters, so each configuration is its own build:
@@ -134,7 +136,7 @@ Cache geometry is a set of RTL parameters, so each configuration is its own buil
 make all IC_BYTES=1024 IC_WAYS=4 DC_BYTES=4096 DC_WAYS=4 DC_WB=1 IMEM_LAT=10 DMEM_LAT=10
 ```
 
-Synthesis scripts are in [`syn/`](syn/); see [`syn/build.tcl`](syn/build.tcl) for the per-config invocation.
+The synthesis wrapper honors `VIVADO=/path/to/vivado`, then native Vivado, then Windows Vivado 2025.2 under WSL. It stages private projects outside the checkout and retains only ignored reports plus hashed manifests.
 
 ## What I learned
 

@@ -1,23 +1,10 @@
-# build.tcl - out-of-context synth+impl for one cache/latency configuration.
 # Usage: vivado -mode batch -source build.tcl -tclargs <name> \
 #            <ic_bytes> <ic_block> <ic_ways> <dc_bytes> <dc_block> <dc_ways> <dc_wb> \
 #            <imem_depth> <dmem_depth>
-#
-# Run from a directory containing rtl/*.sv, blank_instr.hex, blank_data.hex,
-# and this file's sibling cpu.xdc.
-#
-# blank_instr.hex/blank_data.hex must be genuinely varied (random.seed(42),
-# getrandbits(32) per word) content sized to match <imem_depth>/<dmem_depth) -
-# an all-zero or otherwise degenerate memory lets Vivado's synthesis prove
-# huge chunks of the datapath are constant and optimize them away, producing
-# resource numbers with no relationship to the real design (found the hard
-# way: an all-zero placeholder synthesized to 7 LUTs for the whole CPU).
-#
-# The results this project reports (see docs/MICROARCHITECTURE.md#synthesis)
-# used 512 for both <imem_depth> and <dmem_depth>: large enough to exercise
-# real address-decode logic, small enough that the core and +1KB-I$ configs
-# fit an xc7a35t; the D-cache configs don't fit regardless of this number
-# (see the doc - it's the cache array itself, not backing memory size).
+
+if {[llength $argv] != 10} {
+    error "expected 10 synthesis arguments"
+}
 
 set cfg_name    [lindex $argv 0]
 set ic_bytes    [lindex $argv 1]
@@ -57,5 +44,17 @@ write_checkpoint -force "$outdir/post_route.dcp"
 report_utilization -file "$outdir/utilization.rpt"
 report_timing_summary -delay_type min_max -report_unconstrained -file "$outdir/timing_summary.rpt"
 report_timing -delay_type max -max_paths 5 -sort_by group -file "$outdir/critical_paths.rpt"
+
+set applied_part [get_property PART [current_project]]
+set clocks [get_clocks clk]
+if {[llength $clocks] != 1} {
+    error "expected one clk constraint"
+}
+set applied_period [get_property PERIOD $clocks]
+set meta [open "$outdir/build_meta.txt" w]
+puts $meta "config=$cfg_name"
+puts $meta "part=$applied_part"
+puts $meta "clock_period_ns=$applied_period"
+close $meta
 
 puts "===BUILD_DONE:$cfg_name==="
