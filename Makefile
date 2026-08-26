@@ -100,6 +100,9 @@ test: sim assemble memtiming
 # the fixtures invoke the real binary.
 harness-test: sim
 	python3 tools/test_harness.py
+	@$(MAKE) --no-print-directory sim IC_BYTES=0 DC_BYTES=4096 DC_WAYS=4 DC_WB=0 IMEM_LAT=1 DMEM_LAT=10
+	SIM="$(CURDIR)/obj_dir_ic0_4_1_dc4096_4_4_0_L1_10/Vcpu" \
+		python3 -m unittest -v tools.test_harness.HarnessTest.test_tohost_bypasses_dcache
 
 evidence-check:
 	python3 -m unittest -v tools.test_evidence_check

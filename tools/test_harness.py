@@ -234,6 +234,13 @@ class HarnessTest(unittest.TestCase):
         )
         self.assert_failure(result, "error: D-cache misses exceed accesses")
 
+    def test_tohost_bypasses_dcache(self):
+        result = self.invoke(
+            "+STOP=tohost", "+CYCLES=20", f"+REFFILE={self.valid_ref}",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("dcache: accesses=0 misses=0 hitrate=0%", result.stdout)
+
     def test_result_output_open_failure_is_a_failure(self):
         result = self.invoke("+STOP=tohost", "+CYCLES=20",
                           f"+SIGFILE={self.work / 'absent' / 'sig'}",

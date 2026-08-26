@@ -380,8 +380,11 @@ ex_mem_t ex_mem_d, ex_mem_q;
     // A faulting access must NOT be presented to memory. If it were, the pipe
     // would freeze waiting for an access to complete while the trap that would
     // release it can only commit once the pipe is unfrozen - a deadlock.
-    logic dmem_req;
-    assign dmem_req = ex_mem_q.valid && (ex_mem_q.mem_read || ex_mem_q.mem_write) && !ex_mem_q.exc_pending;
+    logic dmem_req, tohost_store;
+    assign tohost_store = ex_mem_q.valid && ex_mem_q.mem_write && !ex_mem_q.exc_pending
+                          && (ex_mem_q.alu_result == XLEN'(TOHOST_ADDR));
+    assign dmem_req = ex_mem_q.valid && (ex_mem_q.mem_read || ex_mem_q.mem_write)
+                      && !ex_mem_q.exc_pending && !tohost_store;
 
     logic [XLEN-1:0] mem_read_data_mem;   // load result, extended, into MEM/WB
     logic [XBYTES-1:0] dm_byte_en;
@@ -623,8 +626,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
     // configuration.
     logic            tohost_valid /* verilator public_flat_rd */;
     logic [XLEN-1:0] tohost_data  /* verilator public_flat_rd */;
-    assign tohost_valid = ex_mem_q.valid && !pipe_stall && ex_mem_q.mem_write
-                          && (ex_mem_q.alu_result == XLEN'(TOHOST_ADDR));
+    assign tohost_valid = tohost_store && !pipe_stall;
     assign tohost_data  = ex_mem_q.rs2_data;
 
     // One retirement per asserted cycle. Gated on !pipe_stall for the same
