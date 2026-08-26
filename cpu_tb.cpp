@@ -275,6 +275,12 @@ int main(int argc, char** argv) {
         top->perf_cycle_count, top->perf_instr_retired, top->perf_stall_count, top->perf_flush_count,
         top->perf_mispredict_count, top->perf_branch_count, top->perf_mem_stall_count,
         top->perf_icache_access, top->perf_icache_miss, top->perf_dcache_access, top->perf_dcache_miss};
+    if (has_arg(argc, argv, "+TEST_FORCE_DCACHE_COUNTER_MISMATCH=1")) {
+        pc_snap.dcacc = 1;
+        pc_snap.dcmiss = 2;
+    }
+    if (verify && pc_snap.icmiss > pc_snap.icacc) fail("I-cache misses exceed accesses");
+    if (verify && pc_snap.dcmiss > pc_snap.dcacc) fail("D-cache misses exceed accesses");
     top->dbg_flush = 1;
     bool drained = !has_arg(argc, argv, "+TEST_FORCE_CACHE_DRAIN_TIMEOUT=1");
     if (drained) {
@@ -328,8 +334,10 @@ int main(int argc, char** argv) {
     }
     const double cpi = pc_snap.instret ? static_cast<double>(pc_snap.cyc) / pc_snap.instret : 0.0;
     const double accuracy = pc_snap.branches ? 100.0 * static_cast<double>(pc_snap.branches - pc_snap.mispred) / pc_snap.branches : 0.0;
-    const double ichr = pc_snap.icacc ? 100.0 * static_cast<double>(pc_snap.icacc - pc_snap.icmiss) / pc_snap.icacc : 0.0;
-    const double dchr = pc_snap.dcacc ? 100.0 * static_cast<double>(pc_snap.dcacc - pc_snap.dcmiss) / pc_snap.dcacc : 0.0;
+    const double ichr = pc_snap.icacc && pc_snap.icmiss <= pc_snap.icacc
+                      ? 100.0 * static_cast<double>(pc_snap.icacc - pc_snap.icmiss) / pc_snap.icacc : 0.0;
+    const double dchr = pc_snap.dcacc && pc_snap.dcmiss <= pc_snap.dcacc
+                      ? 100.0 * static_cast<double>(pc_snap.dcacc - pc_snap.dcmiss) / pc_snap.dcacc : 0.0;
     std::cout << "  perf: cycles=" << pc_snap.cyc << " instret=" << pc_snap.instret << " stalls=" << pc_snap.stalls
               << " flushes=" << pc_snap.flushes << " memstall=" << pc_snap.memstall << " CPI=" << cpi << "\n"
               << "  bpred: branches=" << pc_snap.branches << " mispredicts=" << pc_snap.mispred << " accuracy=" << accuracy << "%\n"

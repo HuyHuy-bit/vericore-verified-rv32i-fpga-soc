@@ -74,6 +74,7 @@ memtiming:
 unit:
 	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/control.sv unit/control_tb.sv
 	@tools/run_unit.sh hazard_detect_tb rtl/hazard_detect.sv unit/hazard_detect_tb.sv
+	@tools/run_unit.sh dcache_counter_tb rtl/rv32i_pkg.sv rtl/dcache.sv unit/dcache_counter_tb.sv
 
 # Run every test and print a summary.
 test: sim assemble memtiming

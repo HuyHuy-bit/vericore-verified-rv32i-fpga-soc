@@ -31,6 +31,7 @@ module dcache #(
 
     // CPU side
     input  var logic        req,          // a load or store is presented
+    input  var logic        advance,
     input  var logic [XLEN-1:0] addr,
     input  var logic [XBYTES-1:0] byte_en,      // nonzero => store
     input  var logic [XLEN-1:0] write_word,   // already shifted into its lane
@@ -274,8 +275,8 @@ module dcache #(
     always_ff @(posedge clk) begin
         if (rst)                       counted <= 1'b0;
         else if (!req)                 counted <= 1'b0;
-        else if (miss_pulse && !ready) counted <= 1'b1;
-        else if (ready)                counted <= 1'b0;   // access done, rearm
+        else if (miss_pulse)           counted <= !(ready && advance);
+        else if (ready && advance)     counted <= 1'b0;
     end
 
     // State first: a flush runs with no access outstanding, and the pipeline

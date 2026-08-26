@@ -227,6 +227,13 @@ class HarnessTest(unittest.TestCase):
                           "+TEST_FORCE_CACHE_DRAIN_TIMEOUT=1")
         self.assert_failure(result, "error: cache drain deadline exhausted")
 
+    def test_impossible_cache_counters_are_a_failure(self):
+        result = self.invoke(
+            "+STOP=tohost", "+CYCLES=20", f"+REFFILE={self.valid_ref}",
+            "+TEST_FORCE_DCACHE_COUNTER_MISMATCH=1",
+        )
+        self.assert_failure(result, "error: D-cache misses exceed accesses")
+
     def test_result_output_open_failure_is_a_failure(self):
         result = self.invoke("+STOP=tohost", "+CYCLES=20",
                           f"+SIGFILE={self.work / 'absent' / 'sig'}",

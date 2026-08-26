@@ -419,7 +419,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
             .WRITE_BACK(DCACHE_WRITE_BACK)
         ) u_dcache (
             .clk(clk), .rst(rst),
-            .req(dmem_req), .addr(ex_mem_q.alu_result),
+            .req(dmem_req), .advance(!pipe_stall), .addr(ex_mem_q.alu_result),
             .byte_en(dm_byte_en), .write_word(dm_store_word),
             .read_word(dm_read_word), .ready(dmem_ready),
             .mem_addr(dc_mem_addr), .mem_req(dc_mem_req), .mem_burst(dc_mem_burst),
