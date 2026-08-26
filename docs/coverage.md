@@ -1,5 +1,7 @@
 # Functional coverage report
 
+**Evidence status: historical.**
+
 **34/38 cover points hit (89.5%)**, from the directed test suite run against a cache-enabled build (`make coverage`).
 
 | Cover point | Hits |

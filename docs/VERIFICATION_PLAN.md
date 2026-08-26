@@ -2,18 +2,41 @@
 
 What's tested, by what mechanism, and what's explicitly not tested yet.
 
+<details>
+<summary>Machine-checked repository facts</summary>
+
+<!-- evidence-facts:begin -->
+EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
+EVIDENCE_FACT DIRECTED_TESTS=25
+EVIDENCE_FACT ASSERTIONS_TOTAL=27
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
+EVIDENCE_FACT SOURCE_COVER_POINTS=44
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=34
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=38
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT CI_CONFIGS=6
+EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
+EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
+EVIDENCE_FACT ARCH_TEST_EXPECTED=38
+EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
+EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
+<!-- evidence-facts:end -->
+
+</details>
+
 | Mechanism | Scale | What it uniquely catches |
 |---|---|---|
-| Directed tests | 22 programs × 6 cache configs | The specific hazard/trap each was written for |
+| Directed tests | 25 programs × 6 cache configs | The specific hazard/trap each was written for |
 | Compliance suite | 38/38 `rv32i_m/I` | ISA conformance the author wouldn't think to target |
 | Spike lockstep | 38 programs, instruction-by-instruction | Right answer reached by the *wrong path* |
-| SVA assertions | 25 properties, every cycle | Invariant violations, in any test, immediately |
-| Functional coverage | 33/38 points (86.8%) | Scenarios nothing exercises |
-| Constrained-random | 1000 seeds vs. a Python model; 100 vs. Spike | Blind spots of whoever wrote the directed tests |
+| Assertions | 25 concurrent properties + 2 immediate checks | Invariant violations, in any test, immediately |
+| Functional coverage | 44 source points; historical report 34/38 | Scenarios nothing exercises |
+| Constrained-random | 1000 seeds vs. a Python model; 200 vs. Spike | Blind spots of whoever wrote the directed tests |
 
 ## Directed tests (`tests/`, run via `make all`)
 
-22 hand-assembled programs, one per hazard/instruction-class/trap scenario: R-type, I-type, memory, branch, jump, LUI/AUIPC, load-use stall, loop, illegal instruction, misaligned load/store/fetch, MRET, CSR read/write, CSR permission traps, timer interrupt, MRET-from-interrupt, ECALL/EBREAK, D-cache dirty eviction, RAS multi-caller returns, gshare-correlated branches, and FENCE.I. Each checks final register state against a `.ref` file, across the 6-configuration cache matrix — the result must be identical in all 6, since cache configuration is not architecturally visible.
+25 hand-assembled programs cover instruction classes, true and false load-use dependencies, control flow, precise illegal/misaligned traps, CSR permissions, timer/software interrupt state, MRET, cache eviction, RAS/gshare behavior, and FENCE.I. Each checks final register state and optional stall counts against a `.ref` file across the 6-configuration directed matrix; cache configuration is not architecturally visible.
 
 Every test ends by storing to a reserved address (`tohost`, the riscv-tests convention); the run stops there and the stored value is the exit code. This replaced a `same_pc >= 6` heuristic that inferred completion from the PC not moving — which cannot distinguish "finished" from "spinning on a lock", "stalled on slow memory", or "stuck", and made every legitimately-looping test a guess. Completion is detected where the store *commits* rather than by watching memory, so it behaves identically with a write-back cache holding the value dirty.
 
@@ -24,7 +47,7 @@ Tests name their trap handler via a `la` pseudo-instruction rather than a hardco
 
 ## Compliance suite (`compliance/`)
 
-The official `riscv-arch-test` `rv32i_m/I` suite: 38 independently-written programs, each dumping a signature diffed word-for-word against a golden reference. **38/38 passing.** Runs in CI whenever `rtl/**` changes.
+The pinned `riscv-arch-test` `rv32i_m/I` suite contains 38 independently-written programs, each dumping a signature diffed word-for-word against a golden reference. It runs in a dedicated workflow for relevant pushes and pull requests; it is not multiplied across the six directed configurations.
 
 **Catches:** ISA-conformance bugs the directed suite's author (same person as the RTL author) wouldn't target.
 **Doesn't catch:** anything outside base RV32I, and it is still a final-state comparison.
@@ -39,12 +62,12 @@ Both machines run the *same ELF*. Spike reserves low memory, so `compliance/link
 
 Spike itself is pinned in CI to the exact commit these results were measured against, not tracked from `master`. A reference model that changes version underneath you makes every future divergence ambiguous between "the RTL regressed" and "upstream changed" — which is the single question this flow exists to answer unambiguously.
 
-**Catches:** the "right answer via the wrong path" class — wrong forwarding masked by a dead value, a flush that squashes one instruction too many, a stale CSR read nobody observes. This is what made the Phase 7 refactor safe to attempt.
+**Catches:** the "right answer via the wrong path" class — wrong forwarding masked by a dead value, a flush that squashes one instruction too many, or a stale CSR read nobody observes.
 **Doesn't catch:** anything outside these 38 programs — though the same harness is now also driven by random stimulus, see below.
 
 ## SVA assertions
 
-**25 concurrent properties**, built into every simulator binary via `--assert`, checked on every cycle of every test and benchmark. Placed beside the logic they constrain: next-PC redirect priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall-boundedness at the top level.
+**25 concurrent properties** are built into every simulator via `--assert`, and **2 immediate assertions** enforce both directions of the load-use dependency/stall equivalence. They sit beside the logic they constrain: next-PC priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall boundedness at the top level, and hazard soundness/completeness in `hazard_detect.sv`.
 
 The interrupt properties are the sharpest: an interrupt resumes at `pc+4` while a trap re-runs the faulting instruction, so `a_irq_mepc_is_next` and `a_trap_mepc_is_faulting` pin down both directions — getting them backwards silently drops or repeats work.
 
@@ -53,9 +76,9 @@ The interrupt properties are the sharpest: an interrupt resumes at `pc+4` while 
 
 ## Functional coverage (`make coverage`, `docs/coverage.md`)
 
-Verilator doesn't support covergroups; `cover property` is the supported equivalent. 38 points across forwarding crosses, predictor-outcome crosses, control-flow type, trap causes, and the full D-cache FSM. **33/38 (86.8%)** from the directed suite alone.
+Verilator doesn't support covergroups; `cover property` is the supported equivalent. The RTL currently contains 44 points across forwarding crosses, predictor outcomes, control-flow types, trap causes, and the D-cache FSM. The tracked report is a historical **34/38 (89.5%)** run from before the forwarding-cross expansion; it remains labeled historical until the final `make coverage` rerun.
 
-Each of the five remaining holes is annotated in `docs/coverage.md` with *why* it is still open — none is dead logic. They need either a BTB tag collision, a load-use/mispredict coincidence, or an indirect-jump target mismatch, all of which random stimulus reaches more naturally than a directed test.
+The four holes in that historical report are annotated in `docs/coverage.md` with why they remained open. The fresh report will reconcile those hits against all 44 current source points.
 
 ## Constrained-random, two flows
 

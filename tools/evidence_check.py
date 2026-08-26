@@ -17,6 +17,30 @@ from typing import Callable, Iterable
 
 
 REFERENCE_KEYS = ("ARCH_TEST_SHA", "ARCH_TEST_EXPECTED", "SPIKE_SHA")
+FACT_KEYS = (
+    "ISA",
+    "DIRECTED_TESTS",
+    "ASSERTIONS_TOTAL",
+    "ASSERTIONS_CONCURRENT",
+    "ASSERTIONS_IMMEDIATE",
+    "SOURCE_COVER_POINTS",
+    "TRACKED_COVERAGE_HIT",
+    "TRACKED_COVERAGE_TOTAL",
+    "TRACKED_COVERAGE_STATUS",
+    "CI_CONFIGS",
+    "CI_MATRIX",
+    "ARCH_TEST_SHA",
+    "ARCH_TEST_EXPECTED",
+    "SPIKE_SHA",
+    "SPIKE_RANDOM_SEEDS",
+)
+FACT_DOCUMENTS = (
+    "README.md",
+    "docs/MICROARCHITECTURE.md",
+    "docs/VERIFICATION_PLAN.md",
+    "docs/EVIDENCE.md",
+)
+CANONICAL_ISA = "RV32I_Zicsr_Zifencei"
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 COUNT_RE = re.compile(r"[1-9][0-9]*\Z")
 ASSIGNMENT_RE = re.compile(r"([A-Z][A-Z0-9_]*)=([^\s#]+)\Z")
@@ -29,6 +53,7 @@ REQUIRED_PATHS = (
     "unit/**",
     "tests/**",
 )
+EVIDENCE_PATHS = ("README.md", "docs/**")
 DIRECTED_MATRIX = (
     ("baseline", ""),
     ("slow-mem", "IMEM_LAT=10 DMEM_LAT=10"),
@@ -551,6 +576,8 @@ def event_paths(lines: list[YamlLine], workflow: Path, event: str) -> list[str]:
 def check_triggers(path: Path, lines: list[YamlLine]) -> None:
     event_paths(lines, path, "workflow_dispatch")
     required = set(REQUIRED_PATHS) | {f".github/workflows/{path.name}"}
+    if path.name == "rtl-tests.yml":
+        required.update(EVIDENCE_PATHS)
     for event in ("push", "pull_request"):
         actual = event_paths(lines, path, event)
         for value in sorted(required):
@@ -829,6 +856,16 @@ def check_workflows(root: Path) -> None:
         parsed[name] = (path, lines, parse_jobs(path, lines))
 
     rtl_path, _, rtl_jobs = parsed["rtl-tests.yml"]
+    fast_job = required_job(rtl_path, rtl_jobs, "lint-and-test")
+    validate_required_job(rtl_path, "lint-and-test", fast_job)
+    _, fast_gate = direct_gate_step(
+        rtl_path,
+        fast_job.steps,
+        "make check",
+        "fast workflow gate",
+    )
+    if set(fast_gate.values) != {"name", "run"} or fast_gate.nested:
+        raise ContractError("fast workflow gate has unsupported properties")
     rtl_job = required_job(rtl_path, rtl_jobs, "test-matrix")
     validate_required_job(rtl_path, "test-matrix", rtl_job)
     if parse_directed_matrix(rtl_job.lines) != DIRECTED_MATRIX:
@@ -939,6 +976,208 @@ def check_contracts(root: Path) -> None:
     check_workflows(root)
 
 
+def make_test_names(root: Path) -> tuple[str, ...]:
+    path = root / "Makefile"
+    source = path.read_text(encoding="utf-8")
+    logical: list[str] = []
+    pending = ""
+    for raw in source.splitlines():
+        line = strip_inline_comment(raw).rstrip()
+        if line.endswith("\\"):
+            pending += line[:-1].strip() + " "
+            continue
+        logical.append((pending + line.strip()).strip())
+        pending = ""
+    matches = []
+    for line in logical:
+        match = re.fullmatch(r"TESTS\s*=\s*(.*)", line)
+        if match:
+            matches.append(match.group(1).split())
+    if len(matches) != 1 or not matches[0]:
+        raise ContractError("Makefile must define one nonempty directed TESTS list")
+    names = tuple(matches[0])
+    if len(names) != len(set(names)) or any(
+        re.fullmatch(r"t[0-9][0-9]_[A-Za-z0-9_]+", name) is None for name in names
+    ):
+        raise ContractError("Makefile directed TESTS list is malformed or duplicated")
+    return names
+
+
+def make_target(root: Path, name: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    lines = (root / "Makefile").read_text(encoding="utf-8").splitlines()
+    matches = []
+    for index, line in enumerate(lines):
+        match = re.fullmatch(rf"{re.escape(name)}\s*:\s*(.*)", line)
+        if match:
+            matches.append((index, tuple(match.group(1).split())))
+    if len(matches) != 1:
+        raise ContractError(f"Makefile must define exactly one {name} target")
+    index, dependencies = matches[0]
+    recipes: list[str] = []
+    for line in lines[index + 1:]:
+        if line.startswith("\t"):
+            recipes.append(line[1:].strip())
+        elif line.strip():
+            break
+    return dependencies, tuple(recipes)
+
+
+def check_build_surface(root: Path) -> None:
+    evidence_dependencies, evidence_recipes = make_target(root, "evidence-check")
+    if evidence_dependencies or evidence_recipes != (
+        "python3 -m unittest -v tools.test_evidence_check",
+        "python3 tools/evidence_check.py",
+    ):
+        raise ContractError("evidence-check target must run its tests and checker")
+    check_dependencies, check_recipes = make_target(root, "check")
+    if check_dependencies != ("unit", "harness-test", "lint", "evidence-check") or check_recipes:
+        raise ContractError("check target must depend on exact fast gates")
+
+
+def check_directed_inventory(root: Path) -> tuple[str, ...]:
+    names = make_test_names(root)
+    test_dir = root / "tests"
+    sources = {path.stem for path in test_dir.glob("*.s")}
+    references = {path.stem for path in test_dir.glob("*.ref")}
+    listed = set(names)
+    if listed != sources or listed != references:
+        details = {
+            "missing_source": sorted(listed - sources),
+            "missing_reference": sorted(listed - references),
+            "unlisted_source": sorted(sources - listed),
+            "unlisted_reference": sorted(references - listed),
+        }
+        raise ContractError(f"directed test inventory mismatch: {details}")
+    return names
+
+
+def strip_sv_comments(source: str) -> str:
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//.*", "", source)
+
+
+def rtl_property_counts(root: Path) -> tuple[int, int, int]:
+    source = "\n".join(
+        strip_sv_comments(path.read_text(encoding="utf-8", errors="replace"))
+        for path in sorted((root / "rtl").glob("*.sv"))
+    )
+    concurrent = len(re.findall(r"\bassert\s+property\s*\(", source))
+    immediate = len(re.findall(r"\bassert\s*\(", source))
+    covers = len(re.findall(r"\bcover\s+property\s*\(", source))
+    return concurrent, immediate, covers
+
+
+def coverage_facts(root: Path) -> tuple[int, int, str]:
+    path = root / "docs/coverage.md"
+    source = path.read_text(encoding="utf-8")
+    statuses = re.findall(r"\*\*Evidence status: (historical|current)\.\*\*", source)
+    summaries = re.findall(
+        r"\*\*([0-9]+)/([0-9]+) cover points hit \(([0-9]+(?:\.[0-9]+)?)%\)\*\*",
+        source,
+    )
+    if len(statuses) != 1 or len(summaries) != 1:
+        raise ContractError("docs/coverage.md must contain one status and one coverage summary")
+    hit, total, percentage = summaries[0]
+    hit_value = int(hit)
+    total_value = int(total)
+    if total_value <= 0 or hit_value > total_value:
+        raise ContractError("docs/coverage.md contains an invalid coverage count")
+    expected_percentage = 100.0 * hit_value / total_value
+    if abs(float(percentage) - expected_percentage) > 0.05:
+        raise ContractError("docs/coverage.md coverage percentage does not match its counts")
+    return hit_value, total_value, statuses[0]
+
+
+def document_facts(root: Path, relative: str) -> dict[str, str]:
+    path = root / relative
+    source = path.read_text(encoding="utf-8")
+    begin = "<!-- evidence-facts:begin -->"
+    end = "<!-- evidence-facts:end -->"
+    if (
+        source.count(begin) != 1
+        or source.count(end) != 1
+        or source.find(begin) > source.find(end)
+    ):
+        raise ContractError(f"{relative}: expected one evidence fact block")
+    block = source.split(begin, 1)[1].split(end, 1)[0]
+    facts: dict[str, str] = {}
+    for raw in block.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        match = re.fullmatch(r"EVIDENCE_FACT ([A-Z][A-Z0-9_]*)=(\S+)", line)
+        if match is None:
+            raise ContractError(f"{relative}: malformed evidence fact: {line}")
+        key, value = match.groups()
+        if key in facts:
+            raise ContractError(f"{relative}: duplicate evidence fact {key}")
+        facts[key] = value
+    missing = [key for key in FACT_KEYS if key not in facts]
+    extra = [key for key in facts if key not in FACT_KEYS]
+    if missing:
+        raise ContractError(f"{relative}: missing evidence fact {missing[0]}")
+    if extra:
+        raise ContractError(f"{relative}: unknown evidence fact {extra[0]}")
+    return facts
+
+
+def workflow_seed(root: Path) -> int:
+    path = root / ".github/workflows/lockstep.yml"
+    jobs = parse_jobs(path, workflow_lines(path))
+    job = required_job(path, jobs, "lockstep")
+    seeds = []
+    for step in job.steps:
+        match = re.fullmatch(r"make soak-lockstep SEEDS=([1-9][0-9]*)", step.run.strip())
+        if match:
+            seeds.append(int(match.group(1)))
+    if len(seeds) != 1:
+        raise ContractError("lockstep workflow must expose one Spike random seed count")
+    return seeds[0]
+
+
+def check_repository_evidence(root: Path) -> None:
+    versions = parse_reference_versions(root)
+    check_build_surface(root)
+    tests = check_directed_inventory(root)
+    concurrent, immediate, covers = rtl_property_counts(root)
+    hit, coverage_total, coverage_status = coverage_facts(root)
+    if coverage_status == "current" and coverage_total != covers:
+        raise ContractError(
+            f"current coverage total {coverage_total} does not match source cover count {covers}"
+        )
+
+    rtl_path = root / ".github/workflows/rtl-tests.yml"
+    rtl_jobs = parse_jobs(rtl_path, workflow_lines(rtl_path))
+    matrix = parse_directed_matrix(required_job(rtl_path, rtl_jobs, "test-matrix").lines)
+    expected = {
+        "ISA": CANONICAL_ISA,
+        "DIRECTED_TESTS": str(len(tests)),
+        "ASSERTIONS_TOTAL": str(concurrent + immediate),
+        "ASSERTIONS_CONCURRENT": str(concurrent),
+        "ASSERTIONS_IMMEDIATE": str(immediate),
+        "SOURCE_COVER_POINTS": str(covers),
+        "TRACKED_COVERAGE_HIT": str(hit),
+        "TRACKED_COVERAGE_TOTAL": str(coverage_total),
+        "TRACKED_COVERAGE_STATUS": coverage_status,
+        "CI_CONFIGS": str(len(matrix)),
+        "CI_MATRIX": ",".join(name for name, _ in matrix),
+        "ARCH_TEST_SHA": versions["ARCH_TEST_SHA"],
+        "ARCH_TEST_EXPECTED": versions["ARCH_TEST_EXPECTED"],
+        "SPIKE_SHA": versions["SPIKE_SHA"],
+        "SPIKE_RANDOM_SEEDS": str(workflow_seed(root)),
+    }
+    documents = {relative: document_facts(root, relative) for relative in FACT_DOCUMENTS}
+    for key in FACT_KEYS:
+        values = {relative: facts[key] for relative, facts in documents.items()}
+        if len(set(values.values())) != 1:
+            raise ContractError(f"conflicting evidence fact {key}: {values}")
+        actual = next(iter(values.values()))
+        if actual != expected[key]:
+            raise ContractError(
+                f"evidence fact {key}={actual} does not match derived value {expected[key]}"
+            )
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -960,10 +1199,15 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root.resolve()
     try:
         check_contracts(root)
+        if not args.contracts_only:
+            check_repository_evidence(root)
     except (ContractError, OSError) as exc:
         print(f"evidence check failed: {exc}", file=sys.stderr)
         return 1
-    print("reference and CI contracts: OK")
+    if args.contracts_only:
+        print("reference and CI contracts: OK")
+    else:
+        print("repository evidence: OK")
     return 0
 
 

@@ -11,6 +11,8 @@ on:
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'README.md'
+      - 'docs/**'
       - '.github/workflows/rtl-tests.yml'
   pull_request:
     paths:
@@ -21,6 +23,8 @@ on:
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'README.md'
+      - 'docs/**'
       - '.github/workflows/rtl-tests.yml'
 
 jobs:
@@ -49,8 +53,8 @@ jobs:
       - name: Verilator version
         run: verilator --version
 
-      - name: Lint
-        run: make lint
+      - name: Fast correctness checks
+        run: make check
 
   # The directed suite must pass identically across cache configurations —
   # that invariance is itself the test. Without this matrix, the D-cache and

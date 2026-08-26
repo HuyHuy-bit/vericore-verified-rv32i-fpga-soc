@@ -1,8 +1,33 @@
 # RV32I Pipelined CPU
 
-A 5-stage pipelined RISC-V (RV32I) core in SystemVerilog — forwarding, branch prediction, precise exceptions, and a parameterised I/D cache hierarchy. Verified against the official RISC-V compliance suite, and synthesized to a real FPGA target so every performance claim has both a CPI number and an fmax number behind it.
+A 5-stage pipelined `RV32I_Zicsr_Zifencei` core in SystemVerilog — forwarding, branch prediction, precise exceptions, and a parameterised I/D cache hierarchy. Its directed, architecture-signature, and retirement-lockstep flows are independently gated, with current measurement provenance tracked in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 [![RTL Tests](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/rtl-tests.yml/badge.svg)](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/rtl-tests.yml)
+[![RISC-V Compliance Suite](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/compliance.yml/badge.svg)](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/compliance.yml)
+[![Spike Lockstep](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/lockstep.yml/badge.svg)](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/lockstep.yml)
+
+<details>
+<summary>Machine-checked repository facts</summary>
+
+<!-- evidence-facts:begin -->
+EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
+EVIDENCE_FACT DIRECTED_TESTS=25
+EVIDENCE_FACT ASSERTIONS_TOTAL=27
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
+EVIDENCE_FACT SOURCE_COVER_POINTS=44
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=34
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=38
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT CI_CONFIGS=6
+EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
+EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
+EVIDENCE_FACT ARCH_TEST_EXPECTED=38
+EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
+EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
+<!-- evidence-facts:end -->
+
+</details>
 
 ![Datapath block diagram](docs/datapath.svg)
 
@@ -12,7 +37,7 @@ Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. 
 
 | | |
 |---|---|
-| **ISA** | RV32I base integer, M-mode only |
+| **ISA** | `RV32I_Zicsr_Zifencei`, with documented M-mode trap, CSR, and interrupt facilities |
 | **Pipeline** | 5-stage in-order (IF/ID/EX/MEM/WB), single issue |
 | **Hazards** | EX/MEM + MEM/WB forwarding; 1-cycle stall on load-use |
 | **Branch prediction** | 64-entry BTB + 2-bit saturating counters, resolved in EX (2-cycle penalty); optional gshare direction table (`GSHARE=1`); 8-entry return-address stack, on by default |
@@ -21,11 +46,11 @@ Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. 
 | **Caches** | Parameterised I$ and D$ — capacity, block size, associativity, write-through/no-allocate or write-back/write-allocate |
 | **Interrupts** | `mstatus` MIE/MPIE/MPP stack, `mie`/`mip`, timer (`mtime`/`mtimecmp`) and software interrupts |
 | **Memory ordering** | `FENCE` is a no-op (in-order, single hart); `FENCE.I` invalidates the I-cache and refetches |
-| **Not implemented** | External interrupts, any extension beyond base I |
+| **Not implemented** | External interrupts, M/A/C extensions, S/U privilege modes |
 
 ## Synthesis
 
-Out-of-context synth → place → route, Vivado 2025.2, target `xc7a35ticsg324-1L` (Arty A7-35T). Backing memories sized to 512 words for the study; fmax derived from worst negative slack against a deliberately-unachievable 2 ns constraint.
+The table below is a historical Vivado 2025.2 route snapshot for `xc7a35ticsg324-1L` with 512-word backing memories and a 2 ns constraint. It is retained as design history, not current headline evidence; the reproducible four-route rerun is tracked in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 | Config | fmax | LUT | FF | BRAM |
 |---|---|---|---|---|
@@ -34,13 +59,13 @@ Out-of-context synth → place → route, Vivado 2025.2, target `xc7a35ticsg324-
 | + 4KB D$ write-through | 71.6 MHz | 8,306 (40%) | 13,461 (32%) | 8 × RAMB18 |
 | + 4KB D$ write-back | 73.5 MHz | 9,256 (45%) | 13,491 (32%) | 8 × RAMB18 |
 
-All four rows are measured on the same current RTL, so they compare to each other. Two things they show that the earlier (pre-interrupt, pre-BRAM-I-cache) numbers didn't: the full hierarchy now fits in **45% of the device instead of 71%**, because the Block RAM rework applies to both caches rather than just the D-cache; and write-back's cost over write-through is **+950 LUT for the dirty-bit and writeback-FSM logic**, with essentially identical flip-flop count — a concrete area price to set against the CPI wins in the Performance table below.
+Within that historical snapshot, the rows compare the cache configurations under one routing setup. They show the full hierarchy fitting in **45% of the device instead of 71%**, because the Block RAM rework applies to both caches, and a **+950 LUT** write-back cost over write-through for dirty-bit and writeback-FSM logic.
 
 The fmax figures are *lower* than earlier revisions of this table reported (the D-cache rows previously read ~76 MHz). That is not a regression from the Block RAM work — that change measurably *improved* fmax by 9.8%, see below. It is the accumulated cost of everything added since those numbers were taken: interrupts, the return-address stack, and the gshare predictor. The core-only row shows the same effect in isolation, 79.2 → 75.3 MHz.
 
 Getting the D-cache to fit took four RTL revisions, and the intermediate results were the lesson: a registered read alone changed nothing (316% → 315% LUT); splitting the `[WAYS][SETS][BLOCK_WORDS]` array into per-way flat arrays did the real work (→ 82%); and `ram_style="block"` was *refused* until the two write addresses in one `always_ff` were muxed into one — a BRAM port has a single address input. Full progression in [`docs/MICROARCHITECTURE.md`](docs/MICROARCHITECTURE.md#synthesis).
 
-**Getting the I-cache into Block RAM was worth more than the timing work.** Applying the D-cache's per-way-flat-array pattern to `icache.sv` — measured against a control build that is identical current RTL with only the array structure reverted, so this is the restructuring alone and not the other changes since:
+**Getting the I-cache into Block RAM was worth more than the timing work.** In that historical study, the D-cache's per-way-flat-array pattern was measured against an otherwise-identical control with only the I-cache array structure reverted:
 
 | 1KB 4-way I$ | LUT | FF | BRAM | fmax |
 |---|---|---|---|---|
@@ -53,7 +78,7 @@ The core-only row dropped from an earlier 79.2 MHz once interrupt support added 
 
 ## Performance
 
-Five C kernels, each also compiled for the host and run there — the CPU's result is checked against that, so a wrong answer fails the run rather than quietly skewing a number. CPI against a 10-cycle backing memory:
+This historical benchmark snapshot covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The current four-configuration rerun is pending in the evidence ledger.
 
 | kernel | no caches | +1KB I$ | +4KB write-back D$ | ideal 1-cycle memory |
 |---|---|---|---|---|
@@ -77,12 +102,12 @@ Three findings from the geometry sweeps (measured pre-BRAM-rework; the qualitati
 
 | Mechanism | Coverage |
 |---|---|
-| Directed tests | 22, one per hazard/instruction-class/trap/predictor scenario; `tohost` end-of-test |
+| Directed tests | 25, one per hazard/instruction-class/trap/predictor scenario; `tohost` end-of-test |
 | Compliance | `riscv-arch-test` `rv32i_m/I` — **38/38** |
 | Spike lockstep | Same 38, compared instruction-by-instruction — **38/38** |
 | CI matrix | Directed suite × 6 cache/latency configs per push; result must be invariant to cache config |
-| Assertions | 25 SVA properties, live in every build via `--assert` |
-| Functional coverage | 38 cover points, 33 hit (86.8%) — [`docs/coverage.md`](docs/coverage.md) |
+| Assertions | 27 total: 25 concurrent SVA properties and 2 immediate hazard assertions |
+| Functional coverage | 44 source points; tracked historical report is 34/38 (89.5%) pending the current rerun — [`docs/coverage.md`](docs/coverage.md) |
 | Constrained-random | 1000 seeds vs. a Python model (ALU/load-store); **200 seeds vs. Spike** with branches/jumps, per-retirement, in CI |
 | Lint | `verilator -Wall` clean, waivers justified in [`rtl/verilator.vlt`](rtl/verilator.vlt) |
 
@@ -94,6 +119,8 @@ Requires **Verilator**; the compliance suite also needs the **RISC-V GNU toolcha
 
 ```bash
 make all        # build + run directed tests (assertions live)
+make check      # units + harness negatives + lint + evidence consistency
+make evidence-check             # source/document consistency only
 make bench      # C kernels, CPI table
 make coverage   # functional coverage report
 make soak SEEDS=1000            # random programs vs. the Python model

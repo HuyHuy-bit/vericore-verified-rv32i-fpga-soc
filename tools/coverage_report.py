@@ -39,6 +39,8 @@ def main():
 
     print("# Functional coverage report")
     print()
+    print("**Evidence status: current.**")
+    print()
     print(f"**{hit}/{total} cover points hit ({pct:.1f}%)**, from the directed "
           "test suite run against a cache-enabled build (`make coverage`).")
     print()

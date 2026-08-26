@@ -2,7 +2,30 @@
 
 ## Overview and design goals
 
-A 5-stage in-order RV32I pipeline optimized for **measurable trade-offs over raw performance**: every major design choice below has a cheaper or faster alternative that was deliberately not taken, and the point of the project is to state what it cost. It is not optimized for area, power, or clock frequency (see Synthesis for what it does cost on a real device). Interrupts and `FENCE.I` are implemented; nothing beyond base RV32I is.
+A 5-stage in-order `RV32I_Zicsr_Zifencei` pipeline optimized for **measurable trade-offs over raw performance**: every major design choice below has a cheaper or faster alternative that was deliberately not taken, and the point of the project is to state what it cost. Machine-mode traps, CSRs, timer/software interrupts, and `FENCE.I` are implemented; external interrupts and other ISA extensions are not.
+
+<details>
+<summary>Machine-checked repository facts</summary>
+
+<!-- evidence-facts:begin -->
+EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
+EVIDENCE_FACT DIRECTED_TESTS=25
+EVIDENCE_FACT ASSERTIONS_TOTAL=27
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
+EVIDENCE_FACT SOURCE_COVER_POINTS=44
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=34
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=38
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT CI_CONFIGS=6
+EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
+EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
+EVIDENCE_FACT ARCH_TEST_EXPECTED=38
+EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
+EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
+<!-- evidence-facts:end -->
+
+</details>
 
 ## Pipeline organization
 
@@ -36,7 +59,7 @@ Each entry: what was chosen, the alternative, what it costs, and the evidence.
 **Chosen:** both caches use a simple round-robin/FIFO victim pointer per set (`ponytail:` comments in `icache.sv` and `dcache.sv`). **Alternative:** true LRU. **Cost:** for the associativities actually swept in this project (1-4 way), the plan predicts the difference is usually small for a 2-way cache — that's a real, cheap-to-run finding this pass didn't get to. Not measured here.
 
 ### Single MEM commit point for precise exceptions
-**Chosen:** every control-flow-changing exceptional event (trap, MRET, CSR write) resolves at one point, in MEM, in program order. **Alternative:** none seriously — this is what makes the exception model precise "for free" (see `cpu.sv`'s commit-point comment) rather than needing a reorder buffer. **Cost:** none beyond what precise exceptions cost anywhere: the offending and every younger instruction must be flushable, which is why `valid` is threaded through every pipeline register. This is the foundation the 25 SVA assertions and the directed exception tests (`t09`–`t18`) check.
+**Chosen:** every control-flow-changing exceptional event (trap, MRET, CSR write) resolves at one point, in MEM, in program order. **Alternative:** none seriously — this is what makes the exception model precise "for free" (see `cpu.sv`'s commit-point comment) rather than needing a reorder buffer. **Cost:** none beyond what precise exceptions cost anywhere: the offending and every younger instruction must be flushable, which is why `valid` is threaded through every pipeline register. This is the foundation the 27 assertions and the directed exception tests check.
 
 ### BTB-gated prediction (never predicts taken until a first taken hit)
 **Chosen:** a branch is only ever predicted taken after the BTB has already recorded a taken outcome for it — the first execution of any branch is always predicted not-taken. **Cost:** every branch pays a guaranteed misprediction on its first taken occurrence; measured indirectly in the `bpred: accuracy=` figures already reported per test/kernel.
@@ -101,7 +124,7 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 
 - **Data hazards**: EX/MEM and MEM/WB forwarding cover same-register producer/consumer pairs at distance 1 and 2; load-use (distance-1 dependency on a load, which forwarding can't fix because the value doesn't exist yet at EX) is caught by `hazard_detect.sv` and resolved with a one-cycle stall.
 - **Control hazards**: predicted speculatively in IF; resolved in EX. A misprediction squashes IF/ID and ID/EX (the two younger in-flight instructions).
-- **Exceptions**: illegal instruction, misaligned load/store, misaligned fetch (taken branch/JAL to a non-4-byte-aligned target), `ECALL`/`EBREAK`, and illegal CSR access (unimplemented address, or a write to a structurally read-only one) are all detected in EX and committed at the MEM commit point. `mepc`/`mcause`/`mtval` are set on entry; `MRET` restores `mepc` as the redirect target. There is no `mstatus.MIE`/`MPIE`/`MPP` stack — see Limitations.
+- **Exceptions and interrupts**: illegal instruction, misaligned load/store/control-flow target, `ECALL`/`EBREAK`, and illegal CSR access are detected in EX and committed precisely in MEM. Trap entry records `mepc`/`mcause`/`mtval`, moves `mstatus.MIE` to `MPIE`, clears `MIE`, and records M-mode in `MPP`; `MRET` restores `MIE` from `MPIE`, sets `MPIE`, clears `MPP`, and redirects to `mepc`.
 - **Priority** (next-PC mux, highest to lowest): memory-stall freeze > trap/MRET commit > EX misprediction recovery > load-use stall > front-end predicted-taken redirect > sequential.
 
 ## Memory hierarchy
@@ -118,7 +141,7 @@ See the README's [Performance](../README.md#performance) section for the full CP
 
 ## Synthesis
 
-Out-of-context synthesis and implementation (synth → opt → place → route) on a real Vivado 2025.2 toolchain, target `xc7a35ticsg324-1L` (Arty A7-35T), a 2ns (500MHz) clock constraint deliberately unachievable so the reported worst negative slack is the useful data point: fmax = 1 / (period − WNS). Build scripts: [`syn/build.tcl`](../syn/build.tcl), [`syn/cpu.xdc`](../syn/cpu.xdc). Backing memories are sized down to 512 words each for this study (2KB instr + 2KB data via the `IMEM_DEPTH_WORDS`/`DMEM_DEPTH_WORDS` parameters) — resource/timing analysis doesn't need the full 2MB/64KB simulation-default footprint, and the full footprint doesn't fit this device regardless (see below).
+The rows below are historical Vivado 2025.2 implementation studies for `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. They document how the cache arrays reached Block RAM and how routing changed, but they are not a current four-configuration headline matrix. The reproducible rerun and full provenance are tracked in [`EVIDENCE.md`](EVIDENCE.md).
 
 | Config | Result | fmax | LUT | FF | BRAM |
 |---|---|---|---|---|---|
@@ -127,14 +150,12 @@ Out-of-context synthesis and implementation (synth → opt → place → route) 
 | + 4KB D-cache, write-through | Routed | 71.6 MHz | 8,306 / 20,800 (40%) | 13,461 / 41,600 (32%) | 8 × RAMB18 |
 | + 4KB D-cache, write-back | Routed | 73.5 MHz | 9,256 / 20,800 (45%) | 13,491 / 41,600 (32%) | 8 × RAMB18 |
 
-All four rows are measured against the same current RTL, so they are comparable to each other. Two results only visible once the whole table was re-measured together:
+Within the historical routing snapshot, two results were visible:
 
 - **The full hierarchy now fits in 45% of the device rather than 71%**, because the Block RAM pattern applies to both caches. The earlier table's D-cache rows carried a flip-flop I-cache alongside a BRAM D-cache, which is what made them look near-full.
 - **Write-back costs +950 LUT over write-through** (9,256 vs 8,306) for the dirty bits and the extra FSM states, at essentially identical flip-flop count. That is the area price to set against the CPI wins in the README's Performance table — where write-back is not a uniform improvement either.
 
-The fmax numbers are lower than earlier revisions of this table reported, and the cause is worth stating precisely so it isn't misread as a Block RAM regression: the Block RAM rework *raised* fmax (see below, +9.8% measured against a control). The decline is the accumulated logic added since those older numbers — interrupts, the return-address stack, the gshare predictor — and it shows up identically in the core-only row, 79.2 → 75.0 MHz, which has no caches at all.
-
-The core-only row is a fresh re-measurement, taken after interrupts/`mstatus`/XLEN landed; the three cache rows predate that work and haven't been re-synthesized against the current RTL, so treat them as the last known-good numbers for the cache hierarchy specifically, not as directly comparable to the core-only row above. (The core-only figure also dropped from the ~79 MHz an earlier revision reported, for the mechanistic reason below — interrupt support added real combinational logic to what's now the worst path.)
+The rows were collected at different repository points: the core-only row includes later interrupt work, while the cache rows predate it. They therefore remain implementation history rather than a valid current cross-configuration comparison.
 
 Getting the D-cache rows to exist at all took two rounds of RTL work, and the intermediate measurements are more instructive than the final table:
 
@@ -160,7 +181,7 @@ The cause: each way's `always_ff` wrote *two different addresses* — `idx*BLOCK
 
 ### The same pattern applied to the I-cache
 
-`icache.sv` kept its original `[WAYS][SETS][BLOCK_WORDS]` array long after the D-cache was reworked, on the reasoning that it already fit the device. Applying the proven pattern to it — measured against a control build of the *identical current RTL* with only the array structure reverted, so nothing else that changed in between is credited to it:
+`icache.sv` kept its original `[WAYS][SETS][BLOCK_WORDS]` array long after the D-cache was reworked, on the reasoning that it already fit the device. The historical restructuring study compared it against an otherwise-identical control with only the array shape reverted:
 
 | 1KB 4-way I-cache | LUT | FF | BRAM | WNS | fmax |
 |---|---|---|---|---|---|
@@ -194,20 +215,20 @@ Revised reading of the CPI table in light of all this: the README's speedup numb
 
 See [`docs/VERIFICATION_PLAN.md`](VERIFICATION_PLAN.md) for the full breakdown. In one line each:
 
-- 21 directed tests + 38/38 compliance tests, both run across a 6-configuration cache/latency CI matrix.
-- 38/38 compliance programs additionally re-run through Spike, compared retirement-by-retirement rather than only at the final signature (`make lockstep`).
-- 25 SVA properties, checked on every cycle of every test and benchmark run.
-- 38 functional cover points (`cover property`, the supported stand-in for covergroups on this toolchain); 33/38 (86.8%) hit by the directed suite alone — the remaining 5 are each explained, not silently unhit, in `docs/coverage.md`.
+- 25 directed tests run across the 6-configuration cache/latency CI matrix.
+- 38/38 pinned architecture signatures and 38/38 complete Spike traces run in their own workflows, not across the directed matrix.
+- 27 assertions: 25 concurrent SVA properties plus 2 immediate hazard checks.
+- 44 source cover points; the tracked 34/38 report is historical until `make coverage` regenerates it from the current source set.
 - Constrained-random regression (`make soak`) against a small Python golden model, 1000/1000 seeds clean on both cacheless and cache-enabled builds — scoped to the ALU/load-store subset, since the model doesn't interpret control flow or CSRs (the directed suite, compliance suite, and lockstep cover those instead).
 
 ## Known limitations and future work
 
 Kept in the same honest tone as the README's Notes section, because a list like this is worth more than it costs to write:
 
-- **The I-cache and the backing memories still don't use Block RAM.** The D-cache data array does (4 × RAMB18, see Synthesis), but `icache.sv` kept its original array shape and `instr_mem.sv`/`data_mem.sv` still read combinationally, so the I-cache's ~8Kbit of storage is still costing thousands of flip-flops that a single BRAM tile would hold. The fix is mechanical now that the D-cache proves out the pattern — per-way flat arrays, one unified write port. Not done because the I-cache already fits and the D-cache was the blocker.
+- **The backing memories still don't use Block RAM.** Both caches use the per-way flat-array structure needed for Block RAM inference, but `instr_mem.sv` and `data_mem.sv` remain combinational simulation-scale arrays.
 - **fmax is still a working number, not a good one.** One timing optimization was attempted and measured (registering the interrupt-timer comparator, +0.45% — see Synthesis above), but the build is congestion-bound at this device size, not logic-depth-bound, so a single-chain fix like that one reliably surfaces the next-worst path rather than moving fmax by much. No retiming of the tag-compare/way-select path, no shortening of the redirect priority mux — both remain real, unattempted next steps.
 - **No decoupled front end, no non-blocking caches, no store buffer.** All three are real, well-understood next steps (10b/10c in the improvement plan). Each is a significant redesign of the freeze/flush/redirect logic the rest of this project's verification work protects, and — unlike when this note was first written — the Spike lockstep regression net now exists to validate them against; none have been attempted yet regardless.
-- **No `FENCE.I`.** Decodes as a no-op. Self-modifying or dynamically-loaded code can observe stale instructions after a store to code space.
+- **`FENCE.I` cannot demonstrate unified-memory coherence.** It commits, invalidates the I-cache, flushes younger fetches, and refetches from `pc+4`; the separate instruction/data backing arrays prevent stores to code space, so self-modifying-code visibility is outside this memory model.
 - **No AXI wrapper.** The bespoke `req`/`burst`/`ready` memory-port protocol works but isn't the industry-standard interface an SoC integration would expect.
 - **No external interrupt.** `mie`/`mip` only implement the software and timer bits; there's no `mip.MEIP` and nothing to drive it, since this core has no interrupt controller or SoC fabric to source an external interrupt from.
 - **RAS is speculative and unrepaired.** Pushes/pops happen at fetch time, before the pipeline knows whether that fetch is even on the correct path, and a misprediction flush doesn't roll the stack back — see the Return-address stack section above for a measured example of this actually happening.

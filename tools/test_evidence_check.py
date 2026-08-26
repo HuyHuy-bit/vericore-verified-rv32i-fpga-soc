@@ -118,6 +118,8 @@ class EvidenceContractTest(unittest.TestCase):
 
     def trigger_block(self, workflow: str) -> str:
         paths = self.REQUIRED_PATHS + (f".github/workflows/{workflow}",)
+        if workflow == "rtl-tests.yml":
+            paths += ("README.md", "docs/**")
         rendered = "\n".join(f"      - '{path}'" for path in paths)
         return (
             "on:\n"
@@ -268,7 +270,11 @@ class EvidenceContractTest(unittest.TestCase):
         )
         return (
             self.trigger_block("rtl-tests.yml")
-            + "\nname: RTL Tests\n\njobs:\n  test-matrix:\n    runs-on: ubuntu-latest\n"
+            + "\nname: RTL Tests\n\njobs:\n"
+            + "  lint-and-test:\n    runs-on: ubuntu-latest\n"
+            + "    defaults:\n      run:\n        shell: bash -l {0}\n"
+            + "    steps:\n      - name: Fast correctness checks\n        run: make check\n"
+            + "  test-matrix:\n    runs-on: ubuntu-latest\n"
             + "    defaults:\n      run:\n        shell: bash -l {0}\n"
             + "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n"
             + matrix
@@ -283,6 +289,81 @@ class EvidenceContractTest(unittest.TestCase):
     def write_workflow(self, name: str, contents: str) -> None:
         self.write(f".github/workflows/{name}", contents)
 
+    def evidence_facts(self, **overrides: str) -> dict[str, str]:
+        facts = {
+            "ISA": "RV32I_Zicsr_Zifencei",
+            "DIRECTED_TESTS": "2",
+            "ASSERTIONS_TOTAL": "2",
+            "ASSERTIONS_CONCURRENT": "1",
+            "ASSERTIONS_IMMEDIATE": "1",
+            "SOURCE_COVER_POINTS": "2",
+            "TRACKED_COVERAGE_HIT": "1",
+            "TRACKED_COVERAGE_TOTAL": "2",
+            "TRACKED_COVERAGE_STATUS": "historical",
+            "CI_CONFIGS": "6",
+            "CI_MATRIX": ",".join(name for name, _ in self.MATRIX),
+            "ARCH_TEST_SHA": self.ARCH_SHA,
+            "ARCH_TEST_EXPECTED": "7",
+            "SPIKE_SHA": self.SPIKE_SHA,
+            "SPIKE_RANDOM_SEEDS": "200",
+        }
+        facts.update(overrides)
+        return facts
+
+    def fact_block(self, **overrides: str) -> str:
+        facts = self.evidence_facts(**overrides)
+        rows = "\n".join(f"EVIDENCE_FACT {key}={value}" for key, value in facts.items())
+        return f"<!-- evidence-facts:begin -->\n{rows}\n<!-- evidence-facts:end -->\n"
+
+    def write_evidence_tree(self) -> None:
+        self.write(
+            "Makefile",
+            "TESTS = t01_alpha t02_beta\n\n"
+            ".PHONY: evidence-check check\n\n"
+            "evidence-check:\n"
+            "\tpython3 -m unittest -v tools.test_evidence_check\n"
+            "\tpython3 tools/evidence_check.py\n\n"
+            "check: unit harness-test lint evidence-check\n",
+        )
+        for name in ("t01_alpha", "t02_beta"):
+            self.write(f"tests/{name}.s", "addi x1, x0, 1\n")
+            self.write(f"tests/{name}.ref", "cycles=10\nx1=1\n")
+        self.write(
+            "rtl/core.sv",
+            "module core(input logic clk, rst, value);\n"
+            "  a_concurrent: assert property (@(posedge clk) disable iff (rst) value);\n"
+            "  always_comb begin\n"
+            "    a_immediate: assert (value || rst);\n"
+            "  end\n"
+            "  c_one: cover property (@(posedge clk) value);\n"
+            "  c_two: cover property (@(posedge clk) !value);\n"
+            "endmodule\n",
+        )
+        self.write(
+            "docs/coverage.md",
+            "# Functional coverage report\n\n"
+            "**Evidence status: historical.**\n\n"
+            "**1/2 cover points hit (50.0%)**, from a recorded run.\n",
+        )
+        block = self.fact_block()
+        for relative in (
+            "README.md",
+            "docs/MICROARCHITECTURE.md",
+            "docs/VERIFICATION_PLAN.md",
+            "docs/EVIDENCE.md",
+        ):
+            self.write(relative, f"# Evidence fixture\n\n{block}")
+
+    def replace_all_fact_values(self, old: str, new: str) -> None:
+        for relative in (
+            "README.md",
+            "docs/MICROARCHITECTURE.md",
+            "docs/VERIFICATION_PLAN.md",
+            "docs/EVIDENCE.md",
+        ):
+            path = self.repo / relative
+            path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
     def run_checker(self, *extra: str, root: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(CHECKER), "--root", str(root or self.repo),
@@ -293,6 +374,23 @@ class EvidenceContractTest(unittest.TestCase):
             stderr=subprocess.PIPE,
             timeout=20,
         )
+
+    def run_evidence_checker(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(CHECKER), "--root", str(self.repo)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+        )
+
+    def assert_evidence_failure(self, diagnostic: str) -> subprocess.CompletedProcess[str]:
+        result = self.run_evidence_checker()
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertIn(diagnostic, combined)
+        return result
 
     def assert_contract_failure(self, diagnostic: str) -> subprocess.CompletedProcess[str]:
         result = self.run_checker()
@@ -852,6 +950,136 @@ class EvidenceContractTest(unittest.TestCase):
         )
         self.write_workflow("compliance.yml", workflow)
         self.assert_contract_failure("compliance job step sequence is not canonical")
+
+    def test_valid_evidence_tree_passes(self) -> None:
+        self.write_evidence_tree()
+        result = self.run_evidence_checker()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("repository evidence: OK", result.stdout)
+
+    def test_directed_test_requires_source_and_reference_pair(self) -> None:
+        self.write_evidence_tree()
+        (self.repo / "tests/t02_beta.ref").unlink()
+        self.assert_evidence_failure("directed test inventory mismatch")
+
+    def test_unlisted_directed_pair_is_rejected(self) -> None:
+        self.write_evidence_tree()
+        self.write("tests/t03_extra.s", "addi x1, x0, 1\n")
+        self.write("tests/t03_extra.ref", "cycles=10\nx1=1\n")
+        self.assert_evidence_failure("directed test inventory mismatch")
+
+    def test_assertion_fact_must_match_rtl_source(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values("ASSERTIONS_TOTAL=2", "ASSERTIONS_TOTAL=3")
+        self.assert_evidence_failure("ASSERTIONS_TOTAL")
+
+    def test_cover_fact_must_match_rtl_source(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values("SOURCE_COVER_POINTS=2", "SOURCE_COVER_POINTS=3")
+        self.assert_evidence_failure("SOURCE_COVER_POINTS")
+
+    def test_historical_coverage_fact_must_match_report(self) -> None:
+        self.write_evidence_tree()
+        path = self.repo / "docs/coverage.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("1/2", "2/2").replace("50.0%", "100.0%"),
+            encoding="utf-8",
+        )
+        self.assert_evidence_failure("TRACKED_COVERAGE_HIT")
+
+    def test_current_coverage_total_must_match_source(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values(
+            "TRACKED_COVERAGE_STATUS=historical",
+            "TRACKED_COVERAGE_STATUS=current",
+        )
+        path = self.repo / "docs/coverage.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "Evidence status: historical", "Evidence status: current"
+            ),
+            encoding="utf-8",
+        )
+        self.write(
+            "rtl/core.sv",
+            (self.repo / "rtl/core.sv").read_text(encoding="utf-8").replace(
+                "endmodule",
+                "  c_three: cover property (@(posedge clk) rst);\nendmodule",
+            ),
+        )
+        self.assert_evidence_failure("current coverage total")
+
+    def test_ci_configuration_fact_must_match_workflow(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values("CI_CONFIGS=6", "CI_CONFIGS=5")
+        self.assert_evidence_failure("CI_CONFIGS")
+
+    def test_spike_seed_fact_must_match_workflow(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values("SPIKE_RANDOM_SEEDS=200", "SPIKE_RANDOM_SEEDS=199")
+        self.assert_evidence_failure("SPIKE_RANDOM_SEEDS")
+
+    def test_isa_fact_must_use_canonical_name(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values("ISA=RV32I_Zicsr_Zifencei", "ISA=RV32I")
+        self.assert_evidence_failure("ISA")
+
+    def test_conflicting_document_fact_is_rejected(self) -> None:
+        self.write_evidence_tree()
+        path = self.repo / "README.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("DIRECTED_TESTS=2", "DIRECTED_TESTS=9"),
+            encoding="utf-8",
+        )
+        self.assert_evidence_failure("conflicting evidence fact DIRECTED_TESTS")
+
+    def test_duplicate_document_fact_is_rejected(self) -> None:
+        self.write_evidence_tree()
+        path = self.repo / "docs/EVIDENCE.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "EVIDENCE_FACT DIRECTED_TESTS=2",
+                "EVIDENCE_FACT DIRECTED_TESTS=2\nEVIDENCE_FACT DIRECTED_TESTS=2",
+            ),
+            encoding="utf-8",
+        )
+        self.assert_evidence_failure("duplicate evidence fact DIRECTED_TESTS")
+
+    def test_fast_workflow_must_run_make_check(self) -> None:
+        self.write_evidence_tree()
+        workflow = self.rtl_workflow().replace("run: make check", "run: make lint", 1)
+        self.write_workflow("rtl-tests.yml", workflow)
+        self.assert_evidence_failure("fast workflow gate run must be exactly make check")
+
+    def test_fast_workflow_must_trigger_for_portfolio_documents(self) -> None:
+        self.write_evidence_tree()
+        workflow = self.rtl_workflow().replace("      - 'docs/**'\n", "", 1)
+        self.write_workflow("rtl-tests.yml", workflow)
+        self.assert_evidence_failure("push.paths missing docs/**")
+
+    def test_make_check_requires_every_fast_gate(self) -> None:
+        self.write_evidence_tree()
+        path = self.repo / "Makefile"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "check: unit harness-test lint evidence-check",
+                "check: unit lint evidence-check",
+            ),
+            encoding="utf-8",
+        )
+        self.assert_evidence_failure("check target must depend on exact fast gates")
+
+    def test_make_evidence_check_runs_tests_and_checker(self) -> None:
+        self.write_evidence_tree()
+        path = self.repo / "Makefile"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "\tpython3 -m unittest -v tools.test_evidence_check\n",
+                "",
+            ),
+            encoding="utf-8",
+        )
+        self.assert_evidence_failure("evidence-check target must run its tests and checker")
 
     def test_architecture_cache_key_must_use_metadata_output(self) -> None:
         workflow = self.reference_workflow("compliance").replace(

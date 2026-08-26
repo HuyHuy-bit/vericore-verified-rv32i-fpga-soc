@@ -46,7 +46,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test unit harness-test memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
+.PHONY: all sim assemble test unit harness-test evidence-check check memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -99,6 +99,12 @@ test: sim assemble memtiming
 # the fixtures invoke the real binary.
 harness-test: sim
 	python3 tools/test_harness.py
+
+evidence-check:
+	python3 -m unittest -v tools.test_evidence_check
+	python3 tools/evidence_check.py
+
+check: unit harness-test lint evidence-check
 
 # Run the C benchmark kernels and print the CPI table.
 bench: sim
