@@ -41,7 +41,7 @@ load_versions() {
     [ -r "$VERSION_FILE" ] || die "reference version file unreadable: $VERSION_FILE"
 
     ARCH_TEST_SHA=""
-    ARCH_TEST_EXPECTED_CASES=""
+    ARCH_TEST_EXPECTED=""
     SPIKE_SHA=""
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
@@ -56,9 +56,9 @@ load_versions() {
             ARCH_TEST_SHA)
                 [ "$seen_arch" -eq 0 ] || die "duplicate reference version key: $key"
                 ARCH_TEST_SHA="$value"; seen_arch=1 ;;
-            ARCH_TEST_EXPECTED_CASES)
+            ARCH_TEST_EXPECTED)
                 [ "$seen_count" -eq 0 ] || die "duplicate reference version key: $key"
-                ARCH_TEST_EXPECTED_CASES="$value"; seen_count=1 ;;
+                ARCH_TEST_EXPECTED="$value"; seen_count=1 ;;
             SPIKE_SHA)
                 [ "$seen_spike" -eq 0 ] || die "duplicate reference version key: $key"
                 SPIKE_SHA="$value"; seen_spike=1 ;;
@@ -68,7 +68,7 @@ load_versions() {
 
     [[ "$ARCH_TEST_SHA" =~ ^[0-9a-f]{40}$ ]] || die "malformed reference version metadata: ARCH_TEST_SHA"
     [[ "$SPIKE_SHA" =~ ^[0-9a-f]{40}$ ]] || die "malformed reference version metadata: SPIKE_SHA"
-    [[ "$ARCH_TEST_EXPECTED_CASES" =~ ^[1-9][0-9]*$ ]] || die "malformed reference version metadata: ARCH_TEST_EXPECTED_CASES"
+    [[ "$ARCH_TEST_EXPECTED" =~ ^[1-9][0-9]*$ ]] || die "malformed reference version metadata: ARCH_TEST_EXPECTED"
 }
 
 require_tool() {
@@ -97,8 +97,8 @@ checkout_sha=$(git -C "$ARCH_TEST" rev-parse HEAD 2>/dev/null) \
 mapfile -d '' -t SOURCES < <(find "$SRC_DIR" -maxdepth 1 -type f -name '*.S' -print0 | sort -z)
 DISCOVERED=${#SOURCES[@]}
 [ "$DISCOVERED" -gt 0 ] || die "no compliance sources discovered in $SRC_DIR"
-[ "$DISCOVERED" -eq "$ARCH_TEST_EXPECTED_CASES" ] \
-    || die "discovered $DISCOVERED cases; expected $ARCH_TEST_EXPECTED_CASES"
+[ "$DISCOVERED" -eq "$ARCH_TEST_EXPECTED" ] \
+    || die "discovered $DISCOVERED cases; expected $ARCH_TEST_EXPECTED"
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-compliance.XXXXXX") \
     || die "could not create compliance run directory"
@@ -198,4 +198,4 @@ if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo "Failed: ${FAILED_TESTS[*]}"
 fi
 
-[ "$FAIL" -eq 0 ] && [ "$INFRA_FAILURES" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED_CASES" ]
+[ "$FAIL" -eq 0 ] && [ "$INFRA_FAILURES" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED" ]

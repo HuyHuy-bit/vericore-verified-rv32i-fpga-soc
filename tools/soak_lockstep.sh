@@ -46,7 +46,7 @@ load_spike_pin() {
             SPIKE_SHA)
                 [ "$seen_spike" -eq 0 ] || die "duplicate reference version key: $key"
                 SPIKE_SHA="$value"; seen_spike=1 ;;
-            ARCH_TEST_SHA | ARCH_TEST_EXPECTED_CASES) ;;
+            ARCH_TEST_SHA | ARCH_TEST_EXPECTED) ;;
             *) die "malformed reference version metadata: unknown key $key" ;;
         esac
     done < "$VERSION_FILE"

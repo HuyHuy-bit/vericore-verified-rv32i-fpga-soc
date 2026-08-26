@@ -1,8 +1,27 @@
 name: RTL Tests
 
 on:
+  workflow_dispatch:
   push:
+    paths:
+      - 'rtl/**'
+      - 'cpu_tb.cpp'
+      - 'Makefile'
+      - 'compliance/**'
+      - 'tools/**'
+      - 'unit/**'
+      - 'tests/**'
+      - '.github/workflows/rtl-tests.yml'
   pull_request:
+    paths:
+      - 'rtl/**'
+      - 'cpu_tb.cpp'
+      - 'Makefile'
+      - 'compliance/**'
+      - 'tools/**'
+      - 'unit/**'
+      - 'tests/**'
+      - '.github/workflows/rtl-tests.yml'
 
 jobs:
   lint-and-test:

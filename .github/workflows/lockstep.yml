@@ -4,7 +4,24 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'rtl/**'        # only the RTL can change what retires
+      - 'rtl/**'
+      - 'cpu_tb.cpp'
+      - 'Makefile'
+      - 'compliance/**'
+      - 'tools/**'
+      - 'unit/**'
+      - 'tests/**'
+      - '.github/workflows/lockstep.yml'
+  pull_request:
+    paths:
+      - 'rtl/**'
+      - 'cpu_tb.cpp'
+      - 'Makefile'
+      - 'compliance/**'
+      - 'tools/**'
+      - 'unit/**'
+      - 'tests/**'
+      - '.github/workflows/lockstep.yml'
 
 jobs:
   lockstep:
@@ -34,60 +51,78 @@ jobs:
       - name: Install verilator package
         run: mamba install -y -c conda-forge verilator
 
+      - name: Load reference versions
+        id: refs
+        run: |
+          set -eu
+          source tools/reference_versions.env
+          echo "arch_test_sha=$ARCH_TEST_SHA" >> "$GITHUB_OUTPUT"
+          echo "arch_test_expected=$ARCH_TEST_EXPECTED" >> "$GITHUB_OUTPUT"
+          echo "spike_sha=$SPIKE_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Cache riscv-arch-test
         id: arch-test-cache
         uses: actions/cache@v4
         with:
           path: ~/riscv-arch-test
-          key: riscv-arch-test-old-framework-2.x
+          key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}
 
-      - name: Clone riscv-arch-test
-        if: steps.arch-test-cache.outputs.cache-hit != 'true'
+      - name: Fetch pinned riscv-arch-test checkout
+        env:
+          ARCH_TEST_SHA: ${{ steps.refs.outputs.arch_test_sha }}
         run: |
-          git clone --branch old-framework-2.x --depth 1 \
-            https://github.com/riscv-non-isa/riscv-arch-test.git ~/riscv-arch-test
+          set -eu
+          if [ ! -d "$HOME/riscv-arch-test/.git" ]; then
+            git init -q "$HOME/riscv-arch-test"
+          fi
+          git -C "$HOME/riscv-arch-test" remote remove origin 2>/dev/null || true
+          git -C "$HOME/riscv-arch-test" remote add origin \
+            https://github.com/riscv-non-isa/riscv-arch-test.git
+          git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"
+          git -C "$HOME/riscv-arch-test" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
+          test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
 
-      # Spike is a source build and slow to compile, so it's cached on its
-      # commit-pinned tag rather than rebuilt every run.
-      # Pinned to the exact commit every lockstep result in this repo was
-      # measured against, rather than tracking master. A reference model that
-      # silently changes version is a reference model you can't reason about:
-      # a divergence would be ambiguous between "the RTL regressed" and
-      # "upstream changed", which is the one question this whole job exists
-      # to answer unambiguously. The cache key carries the SHA so re-pinning
-      # busts the cache automatically.
-      - name: Cache Spike
+      # Cache the Git checkout and in-tree build together. The lockstep wrappers
+      # can then verify the executable's containing repository identity.
+      - name: Cache Spike source and build
         id: spike-cache
         uses: actions/cache@v4
         with:
-          path: ~/.local/spike
-          key: spike-55b4658dbf574ba0b714083ec436ce2cb5be1998
+          path: ~/riscv-isa-sim
+          key: spike-${{ steps.refs.outputs.spike_sha }}
 
-      - name: Build Spike
-        if: steps.spike-cache.outputs.cache-hit != 'true'
+      - name: Fetch and build pinned Spike
+        env:
+          SPIKE_SHA: ${{ steps.refs.outputs.spike_sha }}
         run: |
-          SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
-          mkdir -p /tmp/spike-src && cd /tmp/spike-src
-          git init -q
-          git remote add origin https://github.com/riscv-software-src/riscv-isa-sim.git
-          git fetch -q --depth 1 origin "$SPIKE_SHA"
-          git checkout -q FETCH_HEAD
-          mkdir build && cd build
-          ../configure --prefix=$HOME/.local/spike
-          make -j$(nproc) && make install
+          set -eu
+          if [ ! -d "$HOME/riscv-isa-sim/.git" ]; then
+            git init -q "$HOME/riscv-isa-sim"
+          fi
+          git -C "$HOME/riscv-isa-sim" remote remove origin 2>/dev/null || true
+          git -C "$HOME/riscv-isa-sim" remote add origin \
+            https://github.com/riscv-software-src/riscv-isa-sim.git
+          git -C "$HOME/riscv-isa-sim" fetch -q --depth 1 origin "$SPIKE_SHA"
+          git -C "$HOME/riscv-isa-sim" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$HOME/riscv-isa-sim" rev-parse HEAD)" = "$SPIKE_SHA"
+          test -z "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)"
+          if [ ! -x "$HOME/riscv-isa-sim/build/spike" ]; then
+            mkdir -p "$HOME/riscv-isa-sim/build"
+            cd "$HOME/riscv-isa-sim/build"
+            ../configure
+            make -j"$(nproc)"
+          fi
+          test -x "$HOME/riscv-isa-sim/build/spike"
 
-      - name: Run lockstep against Spike
+      - name: Run complete architecture-test traces against Spike
         env:
           # $HOME, not "~": a tilde in a YAML env value is a literal string,
           # and neither the shell nor Python expands it on the way through.
           ARCH_TEST: /home/runner/riscv-arch-test
-          SPIKE: /home/runner/.local/spike/bin/spike
-        run: |
-          # Fail early and clearly if the Spike build or cache restore didn't
-          # actually produce a binary, rather than 38 confusing divergences.
-          test -x "$SPIKE" || { echo "spike missing at $SPIKE"; exit 1; }
-          "$SPIKE" --help >/dev/null 2>&1 || true
-          make lockstep
+          ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
+          SPIKE: /home/runner/riscv-isa-sim/build/spike
+        run: make lockstep
 
       # The compliance programs above are fixed; these are generated fresh and
       # contain branches and jumps, which the Python-model soak cannot produce.
@@ -95,5 +130,5 @@ jobs:
       # locally. Reuses the obj_dir_lockstep build the previous step made.
       - name: Random programs against Spike (with control flow)
         env:
-          SPIKE: /home/runner/.local/spike/bin/spike
+          SPIKE: /home/runner/riscv-isa-sim/build/spike
         run: make soak-lockstep SEEDS=200

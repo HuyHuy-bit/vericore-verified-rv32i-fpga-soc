@@ -908,7 +908,7 @@ class ComplianceRunnerTest(unittest.TestCase):
     def write_versions(self, contents=None):
         self.versions.write_text(contents or (
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
-            "ARCH_TEST_EXPECTED_CASES=1\n"
+            "ARCH_TEST_EXPECTED=1\n"
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         ))
 
@@ -984,7 +984,7 @@ fi
         self.write_versions(
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
-            "ARCH_TEST_EXPECTED_CASES=1\n"
+            "ARCH_TEST_EXPECTED=1\n"
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         )
         self.assert_runner_failure("error: duplicate reference version key: ARCH_TEST_SHA")
@@ -992,13 +992,13 @@ fi
     def test_compliance_ignores_noncentral_version_override(self):
         self.write_versions(
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
-            "ARCH_TEST_EXPECTED_CASES=2\n"
+            "ARCH_TEST_EXPECTED=2\n"
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         )
         attacker_versions = self.work / "attacker.env"
         attacker_versions.write_text(
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
-            "ARCH_TEST_EXPECTED_CASES=1\n"
+            "ARCH_TEST_EXPECTED=1\n"
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         )
         self.env["REFERENCE_VERSIONS"] = str(attacker_versions)
@@ -1010,7 +1010,7 @@ fi
     def test_compliance_stops_count_mismatch_before_simulation(self):
         self.write_versions(
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
-            "ARCH_TEST_EXPECTED_CASES=2\n"
+            "ARCH_TEST_EXPECTED=2\n"
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         )
         marker = self.work / "simulator-ran"
@@ -1376,7 +1376,7 @@ class LockstepWrapperTest(unittest.TestCase):
         shutil.copy2(ROOT / "tools/run_lockstep.sh", self.repo / "tools/run_lockstep.sh")
         self.versions = self.repo / "tools/reference_versions.env"
         self.versions.write_text(
-            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED_CASES=1\nSPIKE_SHA=" + "b" * 40 + "\n"
+            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED=1\nSPIKE_SHA=" + "b" * 40 + "\n"
         )
         for path in (self.repo / "compliance/link/spike-lockstep.ld",
                      self.repo / "compliance/elf2hex.py",
@@ -1489,7 +1489,7 @@ exec "$REAL_PYTHON" "$@"
         self.add_source()
         self.versions.write_text(
             "ARCH_TEST_SHA=" + "a" * 40
-            + "\nARCH_TEST_EXPECTED_CASES=2\nSPIKE_SHA=" + "b" * 40 + "\n")
+            + "\nARCH_TEST_EXPECTED=2\nSPIKE_SHA=" + "b" * 40 + "\n")
         self.assert_wrapper_failure("discovered 1 lockstep cases; expected 2")
 
     def test_zero_deadlines_are_rejected_before_compiler_or_comparator(self):
@@ -1521,7 +1521,7 @@ class SoakLockstepWrapperTest(unittest.TestCase):
                      self.repo / "compliance/link/spike-lockstep.ld"):
             path.write_text("")
         (self.repo / "tools/reference_versions.env").write_text(
-            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED_CASES=38\nSPIKE_SHA=" + "b" * 40 + "\n"
+            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED=1\nSPIKE_SHA=" + "b" * 40 + "\n"
         )
         self.sim = self.repo / "obj_dir_lockstep/Vcpu"
         self.sim.write_text("#!/usr/bin/env bash\nexit 0\n")

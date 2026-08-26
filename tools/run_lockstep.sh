@@ -39,7 +39,7 @@ load_versions() {
     local seen_arch=0 seen_count=0 seen_spike=0
     [ -f "$VERSION_FILE" ] || die "reference version file missing: $VERSION_FILE"
     [ -r "$VERSION_FILE" ] || die "reference version file unreadable: $VERSION_FILE"
-    ARCH_TEST_SHA=""; ARCH_TEST_EXPECTED_CASES=""; SPIKE_SHA=""
+    ARCH_TEST_SHA=""; ARCH_TEST_EXPECTED=""; SPIKE_SHA=""
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in '' | \#*) continue ;; esac
         if [[ ! "$line" =~ ^([A-Z_][A-Z0-9_]*)=([^[:space:]#]+)$ ]]; then
@@ -50,9 +50,9 @@ load_versions() {
             ARCH_TEST_SHA)
                 [ "$seen_arch" -eq 0 ] || die "duplicate reference version key: $key"
                 ARCH_TEST_SHA="$value"; seen_arch=1 ;;
-            ARCH_TEST_EXPECTED_CASES)
+            ARCH_TEST_EXPECTED)
                 [ "$seen_count" -eq 0 ] || die "duplicate reference version key: $key"
-                ARCH_TEST_EXPECTED_CASES="$value"; seen_count=1 ;;
+                ARCH_TEST_EXPECTED="$value"; seen_count=1 ;;
             SPIKE_SHA)
                 [ "$seen_spike" -eq 0 ] || die "duplicate reference version key: $key"
                 SPIKE_SHA="$value"; seen_spike=1 ;;
@@ -63,8 +63,8 @@ load_versions() {
         || die "malformed reference version metadata: ARCH_TEST_SHA"
     [[ "$SPIKE_SHA" =~ ^[0-9a-f]{40}$ ]] \
         || die "malformed reference version metadata: SPIKE_SHA"
-    [[ "$ARCH_TEST_EXPECTED_CASES" =~ ^[1-9][0-9]*$ ]] \
-        || die "malformed reference version metadata: ARCH_TEST_EXPECTED_CASES"
+    [[ "$ARCH_TEST_EXPECTED" =~ ^[1-9][0-9]*$ ]] \
+        || die "malformed reference version metadata: ARCH_TEST_EXPECTED"
 }
 
 require_tool() {
@@ -101,8 +101,8 @@ spike_sha=$(git -C "$spike_repo" rev-parse HEAD 2>/dev/null) \
 mapfile -d '' -t SOURCES < <(find "$SRC_DIR" -maxdepth 1 -type f -name '*.S' -print0 | sort -z)
 DISCOVERED=${#SOURCES[@]}
 [ "$DISCOVERED" -gt 0 ] || die "no lockstep sources discovered in $SRC_DIR"
-[ "$DISCOVERED" -eq "$ARCH_TEST_EXPECTED_CASES" ] \
-    || die "discovered $DISCOVERED lockstep cases; expected $ARCH_TEST_EXPECTED_CASES"
+[ "$DISCOVERED" -eq "$ARCH_TEST_EXPECTED" ] \
+    || die "discovered $DISCOVERED lockstep cases; expected $ARCH_TEST_EXPECTED"
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-lockstep-suite.XXXXXX") \
     || die "could not create lockstep suite directory"
@@ -150,4 +150,4 @@ echo "========== $PASS/$DISCOVERED programs match Spike instruction-for-instruct
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "Failed: ${FAILED[*]}"
 fi
-[ "$FAIL" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED_CASES" ]
+[ "$FAIL" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED" ]

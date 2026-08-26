@@ -1,10 +1,27 @@
 name: RISC-V Compliance Suite
 
 on:
-  workflow_dispatch:   # manual trigger only - click "Run workflow" on GitHub
+  workflow_dispatch:
   push:
     paths:
-      - 'rtl/**'        # only auto-run when RTL actually changes
+      - 'rtl/**'
+      - 'cpu_tb.cpp'
+      - 'Makefile'
+      - 'compliance/**'
+      - 'tools/**'
+      - 'unit/**'
+      - 'tests/**'
+      - '.github/workflows/compliance.yml'
+  pull_request:
+    paths:
+      - 'rtl/**'
+      - 'cpu_tb.cpp'
+      - 'Makefile'
+      - 'compliance/**'
+      - 'tools/**'
+      - 'unit/**'
+      - 'tests/**'
+      - '.github/workflows/compliance.yml'
 
 jobs:
   compliance:
@@ -34,18 +51,37 @@ jobs:
       - name: Install verilator package
         run: mamba install -y -c conda-forge verilator
 
+      - name: Load reference versions
+        id: refs
+        run: |
+          set -eu
+          source tools/reference_versions.env
+          echo "arch_test_sha=$ARCH_TEST_SHA" >> "$GITHUB_OUTPUT"
+          echo "arch_test_expected=$ARCH_TEST_EXPECTED" >> "$GITHUB_OUTPUT"
+          echo "spike_sha=$SPIKE_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Cache riscv-arch-test
         id: arch-test-cache
         uses: actions/cache@v4
         with:
           path: ~/riscv-arch-test
-          key: riscv-arch-test-old-framework-2.x
+          key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}
 
-      - name: Clone riscv-arch-test
-        if: steps.arch-test-cache.outputs.cache-hit != 'true'
+      - name: Fetch pinned riscv-arch-test checkout
+        env:
+          ARCH_TEST_SHA: ${{ steps.refs.outputs.arch_test_sha }}
         run: |
-          git clone --branch old-framework-2.x --depth 1 \
-            https://github.com/riscv-non-isa/riscv-arch-test.git ~/riscv-arch-test
+          set -eu
+          if [ ! -d "$HOME/riscv-arch-test/.git" ]; then
+            git init -q "$HOME/riscv-arch-test"
+          fi
+          git -C "$HOME/riscv-arch-test" remote remove origin 2>/dev/null || true
+          git -C "$HOME/riscv-arch-test" remote add origin \
+            https://github.com/riscv-non-isa/riscv-arch-test.git
+          git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"
+          git -C "$HOME/riscv-arch-test" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
+          test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
 
       - name: Build simulator
         run: make clean && make all
@@ -54,6 +90,5 @@ jobs:
         env:
           # $HOME, not "~": a tilde in a YAML env value is a literal string.
           ARCH_TEST: /home/runner/riscv-arch-test
-        run: |
-          cd compliance
-          ./run_compliance.sh
+          ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
+        run: make compliance
