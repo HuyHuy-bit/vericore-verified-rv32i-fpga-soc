@@ -75,24 +75,36 @@ class SynthToolTest(unittest.TestCase):
         subprocess.run(["git", "config", "user.name", "Fixture"], cwd=self.repo, check=True)
         subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "fixture"], cwd=self.repo, check=True)
+        self.rtl_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
         self.reports = Path(self.tmp.name) / "reports"
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def run_matrix(self, **environment: str) -> subprocess.CompletedProcess[str]:
+    def run_matrix(
+        self, *, rtl_commit: str | None = None, **environment: str
+    ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env["VIVADO"] = str(self.fake)
         env.update(environment)
+        command = [
+            sys.executable,
+            str(RUNNER),
+            "--root",
+            str(self.repo),
+            "--report-dir",
+            str(self.reports),
+        ]
+        if rtl_commit:
+            command += ["--rtl-commit", rtl_commit]
         return subprocess.run(
-            [
-                sys.executable,
-                str(RUNNER),
-                "--root",
-                str(self.repo),
-                "--report-dir",
-                str(self.reports),
-            ],
+            command,
             cwd=ROOT,
             env=env,
             text=True,
@@ -173,6 +185,16 @@ class SynthToolTest(unittest.TestCase):
     def test_dirty_source_checkout_is_rejected(self) -> None:
         (self.repo / "rtl/core.sv").write_text("module cpu; wire dirty; endmodule\n", encoding="utf-8")
         self.assert_matrix_failure("tracked source differs from the recorded commits")
+
+    def test_explicit_verified_rtl_baseline_is_recorded(self) -> None:
+        (self.repo / "README.md").write_text("portfolio\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "portfolio"], cwd=self.repo, check=True)
+        result = self.run_matrix(rtl_commit=self.rtl_commit)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        manifest = json.loads((self.reports / "core/manifest.json").read_text())
+        self.assertEqual(manifest["rtl_commit"], self.rtl_commit)
+        self.assertNotEqual(manifest["source_commit"], self.rtl_commit)
 
     def test_windows_launcher_selection_and_command_are_local(self) -> None:
         candidate = Path(self.tmp.name) / "Vivado/2025.2/bin/vivado.bat"
@@ -267,6 +289,7 @@ class SynthToolTest(unittest.TestCase):
                 "synth-matrix",
                 f"VIVADO={self.fake}",
                 f"REPORT_DIR={self.reports}",
+                f"RTL_COMMIT={self.rtl_commit}",
             ],
             cwd=self.repo,
             text=True,

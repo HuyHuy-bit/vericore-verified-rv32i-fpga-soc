@@ -220,11 +220,12 @@ def git_output(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def source_identity(root: Path) -> tuple[str, str]:
+def source_identity(root: Path, verified_rtl: str | None = None) -> tuple[str, str]:
     source = git_output(root, "rev-parse", "HEAD")
-    rtl = git_output(root, "log", "-1", "--format=%H", "--", "rtl")
+    rtl = verified_rtl or git_output(root, "log", "-1", "--format=%H", "--", "rtl")
     if not re.fullmatch(r"[0-9a-f]{40}", source) or not re.fullmatch(r"[0-9a-f]{40}", rtl):
         raise SynthError("source commit identity is invalid")
+    git_output(root, "cat-file", "-e", f"{rtl}^{{commit}}")
     for arguments in (
         ("diff", "--quiet", rtl, source, "--", "rtl"),
         ("diff", "--quiet"),
@@ -377,6 +378,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--report-dir", type=Path)
+    parser.add_argument("--rtl-commit")
     parser.add_argument("--timeout", type=int, default=7200)
     return parser.parse_args(argv)
 
@@ -391,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         validate_image(root / "syn/blank_instr.hex")
         validate_image(root / "syn/blank_data.hex")
-        source_commit, rtl_commit = source_identity(root)
+        source_commit, rtl_commit = source_identity(root, args.rtl_commit)
         tool, stage_parent = discover_tool(dict(os.environ))
         measurement_date = datetime.now(timezone.utc).date().isoformat()
         report_dir.parent.mkdir(parents=True, exist_ok=True)
