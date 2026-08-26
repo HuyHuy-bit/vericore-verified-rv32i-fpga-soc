@@ -5,7 +5,7 @@ measurements, and results awaiting the final reproducible rerun. Current
 measurement rows will record the date, exact RTL and tooling commits, command,
 configuration, tool version, result, and any limitation.
 
-The frozen RTL baseline is `f1a18897590d7621d88a5f0c975e5588a3682ddd`.
+The frozen RTL baseline is `87378e281435056fd1bd3dfb57f9c212dca82bb7`.
 The final tooling commit and measurement date remain pending until the synthesis
 wrapper and full measurement matrix are complete.
 
