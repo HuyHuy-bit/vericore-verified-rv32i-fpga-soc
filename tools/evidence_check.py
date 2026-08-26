@@ -12,9 +12,8 @@ import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
-import shlex
 import sys
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 REFERENCE_KEYS = ("ARCH_TEST_SHA", "ARCH_TEST_EXPECTED", "SPIKE_SHA")
@@ -50,6 +49,63 @@ DIRECTED_MATRIX = (
         "DC_WAYS=2 DC_WB=1 IMEM_LAT=10 DMEM_LAT=10",
     ),
 )
+ARCH_UPSTREAM = "https://github.com/riscv-non-isa/riscv-arch-test.git"
+SPIKE_UPSTREAM = "https://github.com/riscv-software-src/riscv-isa-sim.git"
+METADATA_RUN = (
+    "set -eu",
+    "source tools/reference_versions.env",
+    'echo "arch_test_sha=$ARCH_TEST_SHA" >> "$GITHUB_OUTPUT"',
+    'echo "arch_test_expected=$ARCH_TEST_EXPECTED" >> "$GITHUB_OUTPUT"',
+    'echo "spike_sha=$SPIKE_SHA" >> "$GITHUB_OUTPUT"',
+)
+ARCH_SETUP_RUN = (
+    "set -eu",
+    'if [ ! -d "$HOME/riscv-arch-test/.git" ]; then',
+    'git init -q "$HOME/riscv-arch-test"',
+    "fi",
+    'git -C "$HOME/riscv-arch-test" remote remove origin 2>/dev/null || true',
+    f'git -C "$HOME/riscv-arch-test" remote add origin {ARCH_UPSTREAM}',
+    'git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"',
+    'git -C "$HOME/riscv-arch-test" checkout -q --detach "$ARCH_TEST_SHA"',
+    'git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"',
+    'test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"',
+    'test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"',
+    'test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"',
+)
+SPIKE_STAMP_CONDITION = (
+    'if [ ! -x "$HOME/riscv-isa-sim/build/spike" ] || '
+    '[ ! -f "$HOME/riscv-isa-sim/build/.source-sha" ] || '
+    '[ "$(cat "$HOME/riscv-isa-sim/build/.source-sha" 2>/dev/null || true)" '
+    '!= "$SPIKE_SHA" ]; then'
+)
+SPIKE_STAMP_WRITE = "printf '%s\\n' \"$SPIKE_SHA\" > .source-sha"
+SPIKE_STAMP_VERIFY = (
+    'test "$(cat "$HOME/riscv-isa-sim/build/.source-sha")" = "$SPIKE_SHA"'
+)
+SPIKE_SETUP_RUN = (
+    "set -eu",
+    'if [ ! -d "$HOME/riscv-isa-sim/.git" ]; then',
+    'git init -q "$HOME/riscv-isa-sim"',
+    "fi",
+    'git -C "$HOME/riscv-isa-sim" remote remove origin 2>/dev/null || true',
+    f'git -C "$HOME/riscv-isa-sim" remote add origin {SPIKE_UPSTREAM}',
+    'git -C "$HOME/riscv-isa-sim" fetch -q --depth 1 origin "$SPIKE_SHA"',
+    'git -C "$HOME/riscv-isa-sim" checkout -q --detach "$SPIKE_SHA"',
+    'git -C "$HOME/riscv-isa-sim" reset -q --hard "$SPIKE_SHA"',
+    'test "$(git -C "$HOME/riscv-isa-sim" rev-parse HEAD)" = "$SPIKE_SHA"',
+    'test -z "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)"',
+    'test -z "$(git -C "$HOME/riscv-isa-sim" status --short --untracked-files=no)"',
+    SPIKE_STAMP_CONDITION,
+    'rm -rf "$HOME/riscv-isa-sim/build"',
+    'mkdir -p "$HOME/riscv-isa-sim/build"',
+    'cd "$HOME/riscv-isa-sim/build"',
+    "../configure",
+    'make -j"$(nproc)"',
+    SPIKE_STAMP_WRITE,
+    "fi",
+    'test -x "$HOME/riscv-isa-sim/build/spike"',
+    SPIKE_STAMP_VERIFY,
+)
 
 
 class ContractError(ValueError):
@@ -67,10 +123,18 @@ class YamlLine:
 class WorkflowStep:
     values: dict[str, str] = field(default_factory=dict)
     nested: dict[str, dict[str, str]] = field(default_factory=dict)
+    block_values: set[str] = field(default_factory=set)
 
     @property
     def run(self) -> str:
         return self.values.get("run", "")
+
+
+@dataclass
+class WorkflowJob:
+    values: dict[str, str] = field(default_factory=dict)
+    steps: list[WorkflowStep] = field(default_factory=list)
+    lines: list[YamlLine] = field(default_factory=list)
 
 
 def strip_inline_comment(line: str) -> str:
@@ -183,6 +247,7 @@ def parse_steps(lines: list[YamlLine]) -> list[WorkflowStep]:
                 children = chunk[index + 1:child_end]
                 if key == "run" and value in ("|", ">"):
                     step.values[key] = "\n".join(child.text for child in children)
+                    step.block_values.add(key)
                 elif children and value == "":
                     mapping: dict[str, str] = {}
                     for child in children:
@@ -199,27 +264,56 @@ def parse_steps(lines: list[YamlLine]) -> list[WorkflowStep]:
     return steps
 
 
-def shell_commands(run: str) -> list[list[str]]:
-    commands: list[list[str]] = []
+def parse_jobs(path: Path, lines: list[YamlLine]) -> dict[str, WorkflowJob]:
+    """Parse the small top-level job map used by the three required workflows."""
+
+    jobs_index = unique_key(lines, "jobs", 0)
+    section = block_after(lines, jobs_index)
+    starts = [
+        index
+        for index, line in enumerate(section)
+        if line.indent == 2 and line.text.endswith(":")
+    ]
+    jobs: dict[str, WorkflowJob] = {}
+    for position, start in enumerate(starts):
+        end = starts[position + 1] if position + 1 < len(starts) else len(section)
+        name = section[start].text[:-1]
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+            raise ContractError(f"{path.name}: malformed job name {name!r}")
+        if name in jobs:
+            raise ContractError(f"{path.name}: duplicate job {name}")
+        chunk = section[start:end]
+        values: dict[str, str] = {}
+        for line in chunk[1:]:
+            if line.indent != 4:
+                continue
+            entry = parse_mapping_entry(line.text)
+            if entry:
+                values[entry[0]] = entry[1]
+        if sum(line.indent == 4 and line.text == "steps:" for line in chunk) != 1:
+            raise ContractError(f"{path.name}: job {name} must have exactly one steps list")
+        jobs[name] = WorkflowJob(values=values, steps=parse_steps(chunk), lines=chunk)
+    return jobs
+
+
+def logical_run_lines(run: str) -> tuple[str, ...]:
+    """Return normalized logical lines without interpreting shell control flow."""
+
+    lines: list[str] = []
     pending = ""
     for raw in run.splitlines():
         code = strip_inline_comment(raw).strip()
         if not code:
             continue
         if code.endswith("\\"):
-            pending += code[:-1] + " "
+            pending += code[:-1].strip() + " "
             continue
         code = pending + code
         pending = ""
-        try:
-            tokens = shlex.split(code, comments=False, posix=True)
-        except ValueError:
-            tokens = code.split()
-        if tokens:
-            commands.append(tokens)
+        lines.append(re.sub(r"\s+", " ", code).strip())
     if pending.strip():
-        commands.append(pending.split())
-    return commands
+        lines.append(re.sub(r"\s+", " ", pending).strip())
+    return tuple(lines)
 
 
 def parse_reference_versions(root: Path) -> dict[str, str]:
@@ -260,31 +354,56 @@ def parse_reference_versions(root: Path) -> dict[str, str]:
 
 
 def executable_sources(root: Path) -> Iterable[Path]:
-    excluded_names = {"evidence_check.py", "test_evidence_check.py"}
+    excluded_paths = {
+        Path("tools/evidence_check.py"),
+        Path("tools/test_evidence_check.py"),
+        Path("tools/reference_versions.env"),
+    }
     allowed_suffixes = {".py", ".sh", ".yml", ".yaml"}
-    skipped_dirs = {".git", ".superpowers", "docs", "__pycache__", "coverage"}
+    excluded_prefixes = (
+        Path(".git"),
+        Path(".superpowers"),
+        Path(".claude/worktrees"),
+        Path("docs/superpowers"),
+        Path("coverage"),
+    )
     for path in root.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        hidden_nonworkflow = any(
-            part.startswith(".") and part != ".github" for part in relative.parts[:-1]
-        )
-        if any(part in skipped_dirs or part.startswith("obj_dir") for part in relative.parts[:-1]):
+        if relative in excluded_paths:
             continue
-        if hidden_nonworkflow:
+        if any(relative == prefix or prefix in relative.parents for prefix in excluded_prefixes):
             continue
-        if path.name in excluded_names or path == root / "tools/reference_versions.env":
+        if any(part == "__pycache__" or part.startswith("obj_dir") for part in relative.parts):
             continue
-        if path.name == "Makefile" or path.suffix in allowed_suffixes:
+        is_executable = bool(path.stat().st_mode & 0o111)
+        if path.name == "Makefile" or path.suffix in allowed_suffixes or is_executable:
             yield path
+
+
+def normalized_literal_code(source: str) -> str:
+    """Expose shell-adjacent quoted literals without evaluating source."""
+
+    code = "\n".join(strip_inline_comment(line) for line in source.splitlines())
+    return re.sub(r"(?<=[0-9a-f])['\"]+(?=[0-9a-f])", "", code)
+
+
+def alternate_count_name(name: str) -> bool:
+    words = set(name.split("_"))
+    plural = {"CASE", "CASES", "COUNT", "COUNTS"}
+    return (
+        ("EXPECTED" in words and bool(words & plural))
+        or ({"ARCH", "TEST"} <= words and bool(words & plural))
+        or ("TEST" in words and bool(words & plural))
+    )
 
 
 def check_symbolic_consumers(root: Path, versions: dict[str, str]) -> None:
     literal_pins = (versions["ARCH_TEST_SHA"], versions["SPIKE_SHA"])
     for path in executable_sources(root):
         source = path.read_text(encoding="utf-8", errors="replace")
-        code = "\n".join(strip_inline_comment(line) for line in source.splitlines())
+        code = normalized_literal_code(source)
         if "ARCH_TEST_EXPECTED_CASES" in code:
             raise ContractError(f"legacy ARCH_TEST_EXPECTED_CASES in {path.relative_to(root)}")
         for pin in literal_pins:
@@ -294,14 +413,21 @@ def check_symbolic_consumers(root: Path, versions: dict[str, str]) -> None:
                     f"{path.relative_to(root)}"
                 )
         expected = re.escape(versions["ARCH_TEST_EXPECTED"])
-        if re.search(
-            rf"(?<![A-Z0-9_])ARCH_TEST_EXPECTED\s*=\s*['\"]?{expected}['\"]?(?![0-9])",
-            code,
-        ):
-            raise ContractError(
-                "literal expected architecture count duplicated in executable consumer: "
-                f"{path.relative_to(root)}"
-            )
+        assignment = re.compile(
+            rf"(?<![A-Z0-9_])([A-Z][A-Z0-9_]*)\s*=\s*['\"]?{expected}['\"]?(?![0-9])"
+        )
+        for match in assignment.finditer(code):
+            name = match.group(1)
+            if name == "ARCH_TEST_EXPECTED":
+                raise ContractError(
+                    "literal expected architecture count duplicated in executable consumer: "
+                    f"{path.relative_to(root)}"
+                )
+            if alternate_count_name(name):
+                raise ContractError(
+                    "alternate expected architecture count duplicated in executable consumer: "
+                    f"{path.relative_to(root)} ({name})"
+                )
 
     required_uses = {
         "compliance/run_compliance.sh": ("ARCH_TEST_SHA", "ARCH_TEST_EXPECTED"),
@@ -320,7 +446,7 @@ def check_symbolic_consumers(root: Path, versions: dict[str, str]) -> None:
                 raise ContractError(f"{relative} must consume {symbol} symbolically")
 
 
-def event_paths(lines: list[YamlLine], workflow: Path, event: str) -> set[str]:
+def event_paths(lines: list[YamlLine], workflow: Path, event: str) -> list[str]:
     on_index = unique_key(lines, "on", 0)
     on_block = block_after(lines, on_index)
     event_lines = [
@@ -330,7 +456,7 @@ def event_paths(lines: list[YamlLine], workflow: Path, event: str) -> set[str]:
     if len(event_lines) != 1:
         raise ContractError(f"{workflow.name}: missing {event} trigger")
     if event == "workflow_dispatch":
-        return set()
+        return []
     event_index = event_lines[0][0]
     section = block_after(on_block, event_index)
     paths_markers = [
@@ -340,10 +466,10 @@ def event_paths(lines: list[YamlLine], workflow: Path, event: str) -> set[str]:
     if len(paths_markers) != 1:
         raise ContractError(f"{workflow.name}: {event}.paths is required")
     path_block = block_after(section, paths_markers[0][0])
-    paths: set[str] = set()
+    paths: list[str] = []
     for line in path_block:
         if line.indent == 6 and line.text.startswith("- "):
-            paths.add(yaml_scalar(line.text[2:]))
+            paths.append(yaml_scalar(line.text[2:]))
     return paths
 
 
@@ -352,185 +478,164 @@ def check_triggers(path: Path, lines: list[YamlLine]) -> None:
     required = set(REQUIRED_PATHS) | {f".github/workflows/{path.name}"}
     for event in ("push", "pull_request"):
         actual = event_paths(lines, path, event)
-        missing = [value for value in required if value not in actual]
+        for value in sorted(required):
+            if actual.count(value) > 1 or f"!{value}" in actual:
+                raise ContractError(
+                    f"{path.name}: {event}.paths must not negate or duplicate required path {value}"
+                )
+        if len(actual) != len(set(actual)):
+            raise ContractError(f"{path.name}: {event}.paths contains duplicate entries")
+        if any(value.startswith("!") for value in actual):
+            raise ContractError(f"{path.name}: {event}.paths must not contain negated entries")
+        missing = [value for value in required if value not in set(actual)]
         if missing:
             raise ContractError(f"{path.name}: {event}.paths missing {sorted(missing)[0]}")
 
 
-def find_metadata_step(path: Path, steps: list[WorkflowStep]) -> WorkflowStep:
-    matches = [step for step in steps if step.values.get("id") == "refs"]
+def reject_job_controls(path: Path, name: str, job: WorkflowJob) -> None:
+    for key in ("if", "continue-on-error"):
+        if key in job.values:
+            raise ContractError(f"{name} job must not use {key}")
+
+
+def reject_step_controls(step: WorkflowStep) -> None:
+    for key in ("if", "continue-on-error"):
+        if key in step.values:
+            raise ContractError(f"required step must not use {key}")
+
+
+def unique_step(
+    path: Path,
+    steps: list[WorkflowStep],
+    description: str,
+    predicate: Callable[[WorkflowStep], bool],
+) -> tuple[int, WorkflowStep]:
+    matches = [(index, step) for index, step in enumerate(steps) if predicate(step)]
+    if len(matches) != 1:
+        raise ContractError(f"{path.name}: expected exactly one {description} step")
+    index, step = matches[0]
+    reject_step_controls(step)
+    return index, step
+
+
+def find_metadata_step(path: Path, steps: list[WorkflowStep]) -> tuple[int, WorkflowStep]:
+    matches = [(index, step) for index, step in enumerate(steps)
+               if step.values.get("id") == "refs"]
     if len(matches) != 1:
         raise ContractError(f"{path.name}: expected one metadata step with id refs")
-    step = matches[0]
-    commands = shell_commands(step.run)
-    if not any(tokens[:2] in (["source", "tools/reference_versions.env"],
-                              [".", "tools/reference_versions.env"])
-               for tokens in commands):
-        raise ContractError(f"{path.name}: refs step must load tools/reference_versions.env")
-    outputs = {
-        "arch_test_sha": "$ARCH_TEST_SHA",
-        "arch_test_expected": "$ARCH_TEST_EXPECTED",
-        "spike_sha": "$SPIKE_SHA",
-    }
-    for output, symbol in outputs.items():
-        found = False
-        for tokens in commands:
-            if len(tokens) >= 4 and tokens[0] in ("echo", "printf"):
-                if f"{output}={symbol}" in tokens and ">>" in tokens and "$GITHUB_OUTPUT" in tokens:
-                    found = True
-                    break
-        if not found:
-            raise ContractError(f"{path.name}: must publish {output} through GITHUB_OUTPUT")
-    return step
+    index, step = matches[0]
+    reject_step_controls(step)
+    if logical_run_lines(step.run) != METADATA_RUN:
+        raise ContractError(
+            f"{path.name}: metadata step must publish exact expanding output lines; "
+            "must publish arch_test_sha through GITHUB_OUTPUT"
+        )
+    return index, step
 
 
-def cache_step(steps: list[WorkflowStep], path_value: str) -> WorkflowStep | None:
-    for step in steps:
-        uses = step.values.get("uses", "")
-        if uses.startswith("actions/cache@") and step.nested.get("with", {}).get("path") == path_value:
-            return step
-    return None
+def cache_step(
+    path: Path,
+    steps: list[WorkflowStep],
+    path_value: str,
+    description: str,
+) -> tuple[int, WorkflowStep]:
+    return unique_step(
+        path,
+        steps,
+        description,
+        lambda step: (
+            step.values.get("uses") == "actions/cache@v4"
+            and step.nested.get("with", {}).get("path") == path_value
+        ),
+    )
 
 
-def expression_uses(value: str, output: str) -> bool:
-    return re.fullmatch(
-        rf"[^\s]*\$\{{\{{\s*steps\.refs\.outputs\.{re.escape(output)}\s*\}}\}}[^\s]*",
-        value,
-    ) is not None
-
-
-def commands_for_steps(steps: list[WorkflowStep]) -> list[list[str]]:
-    return [command for step in steps for command in shell_commands(step.run)]
-
-
-def command_has(tokens: list[str], *parts: str) -> bool:
-    return all(any(part == token or part in token for token in tokens) for part in parts)
-
-
-def check_architecture_checkout(path: Path, steps: list[WorkflowStep]) -> None:
-    cache = cache_step(steps, "~/riscv-arch-test")
-    if cache is None:
-        raise ContractError(f"{path.name}: architecture-test checkout must be cached")
+def check_architecture_checkout(
+    path: Path, steps: list[WorkflowStep]
+) -> tuple[int, int]:
+    cache_index, cache = cache_step(
+        path, steps, "~/riscv-arch-test", "architecture-test cache"
+    )
     key = cache.nested.get("with", {}).get("key", "")
-    if not expression_uses(key, "arch_test_sha"):
+    if key != "riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}":
         raise ContractError(f"{path.name}: architecture-test cache key must use arch_test_sha output")
 
-    commands = commands_for_steps(steps)
-    if any("--branch" in command or "old-framework-2.x" in command for command in commands):
+    setup_index, setup = unique_step(
+        path,
+        steps,
+        "architecture-test setup",
+        lambda step: (
+            step.nested.get("env", {}).get("ARCH_TEST_SHA")
+            == "${{ steps.refs.outputs.arch_test_sha }}"
+        ),
+    )
+    run = logical_run_lines(setup.run)
+    if any("--branch" in line or "old-framework-2.x" in line for line in run):
         raise ContractError(f"{path.name}: moving architecture-test reference is forbidden")
-    direct_upstream_fetch = any(
-        command_has(
-            command,
-            "riscv-arch-test",
-            "fetch",
-            "https://github.com/riscv-non-isa/riscv-arch-test.git",
-        )
-        for command in commands
+    upstream_line = (
+        f'git -C "$HOME/riscv-arch-test" remote add origin {ARCH_UPSTREAM}'
     )
-    upstream_origin = any(
-        command_has(
-            command,
-            "riscv-arch-test",
-            "remote",
-            "origin",
-            "https://github.com/riscv-non-isa/riscv-arch-test.git",
-        )
-        for command in commands
-    )
-    origin_fetch = any(command_has(command, "riscv-arch-test", "fetch", "origin", "$ARCH_TEST_SHA")
-                       for command in commands)
-    if not (direct_upstream_fetch or (upstream_origin and origin_fetch)):
+    if upstream_line not in run:
         raise ContractError(f"{path.name}: architecture-test checkout must use the approved upstream")
-    fetch = any(command_has(command, "riscv-arch-test", "fetch", "$ARCH_TEST_SHA")
-                for command in commands)
-    detach = any(command_has(command, "riscv-arch-test", "checkout", "--detach")
-                 for command in commands)
-    verify = any(command_has(command, "riscv-arch-test", "rev-parse HEAD", "$ARCH_TEST_SHA")
-                 for command in commands)
-    detached_verify = any(command_has(command, "riscv-arch-test", "symbolic-ref -q HEAD")
-                          for command in commands)
-    env_bound = any(
-        step.nested.get("env", {}).get("ARCH_TEST_SHA")
-        == "${{ steps.refs.outputs.arch_test_sha }}"
-        for step in steps
-    )
-    if not (fetch and detach and verify and detached_verify and env_bound):
-        raise ContractError(f"{path.name}: moving architecture-test reference; fetch and verify the detached SHA")
-
-
-def check_spike_checkout(path: Path, steps: list[WorkflowStep]) -> None:
-    cache = cache_step(steps, "~/riscv-isa-sim")
-    if cache is None:
-        raise ContractError(f"{path.name}: Spike cache must retain the verified source/build checkout")
-    key = cache.nested.get("with", {}).get("key", "")
-    if not expression_uses(key, "spike_sha"):
-        raise ContractError(f"{path.name}: Spike cache key must use spike_sha output")
-    commands = commands_for_steps(steps)
-    direct_upstream_fetch = any(
-        command_has(
-            command,
-            "riscv-isa-sim",
-            "fetch",
-            "https://github.com/riscv-software-src/riscv-isa-sim.git",
-        )
-        for command in commands
-    )
-    upstream_origin = any(
-        command_has(
-            command,
-            "riscv-isa-sim",
-            "remote",
-            "origin",
-            "https://github.com/riscv-software-src/riscv-isa-sim.git",
-        )
-        for command in commands
-    )
-    origin_fetch = any(command_has(command, "riscv-isa-sim", "fetch", "origin", "$SPIKE_SHA")
-                       for command in commands)
-    if not (direct_upstream_fetch or (upstream_origin and origin_fetch)):
-        raise ContractError(f"{path.name}: Spike checkout must use the approved upstream")
-    fetch = any(command_has(command, "riscv-isa-sim", "fetch", "$SPIKE_SHA")
-                for command in commands)
-    detach = any(command_has(command, "riscv-isa-sim", "checkout", "--detach")
-                 for command in commands)
-    verify = any(command_has(command, "riscv-isa-sim", "rev-parse HEAD", "$SPIKE_SHA")
-                 for command in commands)
-    detached_verify = any(command_has(command, "riscv-isa-sim", "symbolic-ref -q HEAD")
-                          for command in commands)
-    binary = any(command_has(command, "riscv-isa-sim/build/spike") for command in commands)
-    env_bound = any(
-        step.nested.get("env", {}).get("SPIKE_SHA") == "${{ steps.refs.outputs.spike_sha }}"
-        for step in steps
-    )
-    if not (fetch and detach and verify and detached_verify and binary and env_bound):
-        raise ContractError(f"{path.name}: Spike must be fetched, built, and verified at spike_sha")
-
-
-def exact_make_commands(steps: list[WorkflowStep]) -> list[tuple[int, list[str]]]:
-    result: list[tuple[int, list[str]]] = []
-    for step_index, step in enumerate(steps):
-        for command in shell_commands(step.run):
-            if command and command[0] == "make":
-                result.append((step_index, command))
-    return result
-
-
-def check_lockstep_gates(path: Path, steps: list[WorkflowStep]) -> None:
-    commands = exact_make_commands(steps)
-    lockstep = [index for index, command in commands if command == ["make", "lockstep"]]
-    soak = [index for index, command in commands
-            if command == ["make", "soak-lockstep", "SEEDS=200"]]
-    any_soak = [command for _, command in commands
-                if len(command) >= 2 and command[1] == "soak-lockstep"]
-    if not lockstep or (soak and min(lockstep) >= min(soak)):
-        raise ContractError(f"{path.name}: lockstep workflow must run make lockstep before random soak")
-    if len(soak) != 1 or len(any_soak) != 1:
+    if run != ARCH_SETUP_RUN:
         raise ContractError(
-            f"{path.name}: lockstep workflow must run exactly make soak-lockstep SEEDS=200"
+            f"{path.name}: architecture-test setup must exactly verify the pinned checkout"
         )
-    spike_paths = [step.nested.get("env", {}).get("SPIKE") for step in steps]
-    if "/home/runner/riscv-isa-sim/build/spike" not in spike_paths:
-        raise ContractError(f"{path.name}: lockstep must execute Spike inside its verified checkout")
+    return cache_index, setup_index
+
+
+def check_spike_checkout(path: Path, steps: list[WorkflowStep]) -> tuple[int, int]:
+    try:
+        cache_index, cache = cache_step(
+            path, steps, "~/riscv-isa-sim", "Spike source/build cache"
+        )
+    except ContractError as exc:
+        raise ContractError(
+            f"{path.name}: Spike cache must retain the verified source/build checkout"
+        ) from exc
+    key = cache.nested.get("with", {}).get("key", "")
+    if key != "spike-${{ steps.refs.outputs.spike_sha }}":
+        raise ContractError(f"{path.name}: Spike cache key must use spike_sha output")
+
+    setup_index, setup = unique_step(
+        path,
+        steps,
+        "Spike setup",
+        lambda step: (
+            step.nested.get("env", {}).get("SPIKE_SHA")
+            == "${{ steps.refs.outputs.spike_sha }}"
+        ),
+    )
+    run = logical_run_lines(setup.run)
+    upstream_line = (
+        f'git -C "$HOME/riscv-isa-sim" remote add origin {SPIKE_UPSTREAM}'
+    )
+    if upstream_line not in run:
+        raise ContractError(f"{path.name}: Spike checkout must use the approved upstream")
+    if not {SPIKE_STAMP_CONDITION, SPIKE_STAMP_WRITE, SPIKE_STAMP_VERIFY} <= set(run):
+        raise ContractError(f"{path.name}: Spike build must be bound to spike_sha with .source-sha")
+    if run != SPIKE_SETUP_RUN:
+        raise ContractError(
+            f"{path.name}: Spike setup must exactly fetch, reset, build, and verify spike_sha"
+        )
+    return cache_index, setup_index
+
+
+def direct_gate_step(
+    path: Path,
+    steps: list[WorkflowStep],
+    command: str,
+    description: str,
+) -> tuple[int, WorkflowStep]:
+    matches = [(index, step) for index, step in enumerate(steps)
+               if step.run.strip() == command]
+    if len(matches) != 1:
+        raise ContractError(f"{path.name}: {description} run must be exactly {command}")
+    index, step = matches[0]
+    if "run" in step.block_values:
+        raise ContractError(f"{path.name}: {description} run must be exactly {command}")
+    reject_step_controls(step)
+    return index, step
 
 
 def parse_directed_matrix(lines: list[YamlLine]) -> tuple[tuple[str, str], ...]:
@@ -562,32 +667,131 @@ def parse_directed_matrix(lines: list[YamlLine]) -> tuple[tuple[str, str], ...]:
     return tuple(items)
 
 
+def required_job(
+    path: Path, jobs: dict[str, WorkflowJob], name: str
+) -> WorkflowJob:
+    if name not in jobs:
+        raise ContractError(f"{path.name}: missing required job {name}")
+    job = jobs[name]
+    reject_job_controls(path, name, job)
+    return job
+
+
+def require_gate_env(
+    path: Path, step: WorkflowStep, required: dict[str, str], description: str
+) -> None:
+    actual = step.nested.get("env", {})
+    for key, value in required.items():
+        if actual.get(key) != value:
+            raise ContractError(f"{path.name}: {description} must bind {key} to {value}")
+
+
 def check_workflows(root: Path) -> None:
     workflow_dir = root / ".github/workflows"
-    parsed: dict[str, tuple[Path, list[YamlLine], list[WorkflowStep]]] = {}
+    parsed: dict[str, tuple[Path, list[YamlLine], dict[str, WorkflowJob]]] = {}
     for name in ("rtl-tests.yml", "compliance.yml", "lockstep.yml"):
         path = workflow_dir / name
         lines = workflow_lines(path)
         check_triggers(path, lines)
-        parsed[name] = (path, lines, parse_steps(lines))
+        parsed[name] = (path, lines, parse_jobs(path, lines))
 
-    rtl_lines = parsed["rtl-tests.yml"][1]
-    if parse_directed_matrix(rtl_lines) != DIRECTED_MATRIX:
+    rtl_path, _, rtl_jobs = parsed["rtl-tests.yml"]
+    rtl_job = required_job(rtl_path, rtl_jobs, "test-matrix")
+    if parse_directed_matrix(rtl_job.lines) != DIRECTED_MATRIX:
         raise ContractError("directed CI matrix does not match the six approved configurations")
+    direct_gate_step(
+        rtl_path,
+        rtl_job.steps,
+        "make all ${{ matrix.args }}",
+        "test-matrix gate",
+    )
 
-    for name in ("compliance.yml", "lockstep.yml"):
-        path, _, steps = parsed[name]
-        find_metadata_step(path, steps)
-        check_architecture_checkout(path, steps)
+    compliance_path, _, compliance_jobs = parsed["compliance.yml"]
+    compliance_job = required_job(compliance_path, compliance_jobs, "compliance")
+    compliance_steps = compliance_job.steps
+    if not any(step.values.get("id") == "refs" for step in compliance_steps) and any(
+        step.values.get("id") == "refs"
+        for name, job in compliance_jobs.items()
+        if name != "compliance"
+        for step in job.steps
+    ):
+        raise ContractError("compliance job is missing its required contract chain")
+    metadata_index, _ = find_metadata_step(compliance_path, compliance_steps)
+    arch_cache_index, arch_setup_index = check_architecture_checkout(
+        compliance_path, compliance_steps
+    )
+    compliance_gate_index, compliance_gate = direct_gate_step(
+        compliance_path, compliance_steps, "make compliance", "compliance gate"
+    )
+    require_gate_env(
+        compliance_path,
+        compliance_gate,
+        {
+            "ARCH_TEST": "/home/runner/riscv-arch-test",
+            "ARCH_TEST_EXPECTED": "${{ steps.refs.outputs.arch_test_expected }}",
+        },
+        "compliance gate",
+    )
+    if not (
+        metadata_index < arch_cache_index < arch_setup_index < compliance_gate_index
+    ):
+        raise ContractError("compliance required steps are out of order")
 
-    compliance_path, _, compliance_steps = parsed["compliance.yml"]
-    if [command for _, command in exact_make_commands(compliance_steps)
-            if command == ["make", "compliance"]] == []:
-        raise ContractError(f"{compliance_path.name}: workflow must run make compliance")
-
-    lockstep_path, _, lockstep_steps = parsed["lockstep.yml"]
-    check_spike_checkout(lockstep_path, lockstep_steps)
-    check_lockstep_gates(lockstep_path, lockstep_steps)
+    lockstep_path, _, lockstep_jobs = parsed["lockstep.yml"]
+    lockstep_job = required_job(lockstep_path, lockstep_jobs, "lockstep")
+    lockstep_steps = lockstep_job.steps
+    lock_metadata_index, _ = find_metadata_step(lockstep_path, lockstep_steps)
+    lock_arch_cache_index, lock_arch_setup_index = check_architecture_checkout(
+        lockstep_path, lockstep_steps
+    )
+    spike_cache_index, spike_setup_index = check_spike_checkout(
+        lockstep_path, lockstep_steps
+    )
+    try:
+        lockstep_gate_index, lockstep_gate = direct_gate_step(
+            lockstep_path, lockstep_steps, "make lockstep", "lockstep gate"
+        )
+    except ContractError as exc:
+        raise ContractError(
+            "lockstep workflow must run make lockstep before random soak; " + str(exc)
+        ) from exc
+    try:
+        soak_gate_index, soak_gate = direct_gate_step(
+            lockstep_path,
+            lockstep_steps,
+            "make soak-lockstep SEEDS=200",
+            "lockstep soak gate",
+        )
+    except ContractError as exc:
+        raise ContractError(
+            "lockstep workflow must run exactly make soak-lockstep SEEDS=200; " + str(exc)
+        ) from exc
+    require_gate_env(
+        lockstep_path,
+        lockstep_gate,
+        {
+            "ARCH_TEST": "/home/runner/riscv-arch-test",
+            "ARCH_TEST_EXPECTED": "${{ steps.refs.outputs.arch_test_expected }}",
+            "SPIKE": "/home/runner/riscv-isa-sim/build/spike",
+        },
+        "lockstep gate",
+    )
+    require_gate_env(
+        lockstep_path,
+        soak_gate,
+        {"SPIKE": "/home/runner/riscv-isa-sim/build/spike"},
+        "lockstep soak gate",
+    )
+    if not (
+        lock_metadata_index
+        < lock_arch_cache_index
+        < lock_arch_setup_index
+        < spike_cache_index
+        < spike_setup_index
+        < lockstep_gate_index
+        < soak_gate_index
+    ):
+        raise ContractError("lockstep required steps are out of order")
 
 
 def check_contracts(root: Path) -> None:

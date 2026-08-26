@@ -148,17 +148,23 @@ class EvidenceContractTest(unittest.TestCase):
                 uses: actions/cache@v4
                 with:
                   path: ~/riscv-arch-test
-                  key: arch-${{ steps.refs.outputs.arch_test_sha }}
+                  key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}
               - name: Fetch pinned architecture tests
                 env:
                   ARCH_TEST_SHA: ${{ steps.refs.outputs.arch_test_sha }}
                 run: |
-                  test -d "$HOME/riscv-arch-test/.git" || git init "$HOME/riscv-arch-test"
+                  set -eu
+                  if [ ! -d "$HOME/riscv-arch-test/.git" ]; then
+                    git init -q "$HOME/riscv-arch-test"
+                  fi
+                  git -C "$HOME/riscv-arch-test" remote remove origin 2>/dev/null || true
                   git -C "$HOME/riscv-arch-test" remote add origin https://github.com/riscv-non-isa/riscv-arch-test.git
-                  git -C "$HOME/riscv-arch-test" fetch --depth 1 origin "$ARCH_TEST_SHA"
-                  git -C "$HOME/riscv-arch-test" checkout --detach FETCH_HEAD
+                  git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"
+                  git -C "$HOME/riscv-arch-test" checkout -q --detach "$ARCH_TEST_SHA"
+                  git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"
                   test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
-                  test "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)" = ""
+                  test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
+                  test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"
             """).lstrip(), "      ")
 
     def spike_steps(self) -> str:
@@ -172,14 +178,28 @@ class EvidenceContractTest(unittest.TestCase):
                 env:
                   SPIKE_SHA: ${{ steps.refs.outputs.spike_sha }}
                 run: |
-                  test -d "$HOME/riscv-isa-sim/.git" || git init "$HOME/riscv-isa-sim"
+                  set -eu
+                  if [ ! -d "$HOME/riscv-isa-sim/.git" ]; then
+                    git init -q "$HOME/riscv-isa-sim"
+                  fi
+                  git -C "$HOME/riscv-isa-sim" remote remove origin 2>/dev/null || true
                   git -C "$HOME/riscv-isa-sim" remote add origin https://github.com/riscv-software-src/riscv-isa-sim.git
-                  git -C "$HOME/riscv-isa-sim" fetch --depth 1 origin "$SPIKE_SHA"
-                  git -C "$HOME/riscv-isa-sim" checkout --detach FETCH_HEAD
+                  git -C "$HOME/riscv-isa-sim" fetch -q --depth 1 origin "$SPIKE_SHA"
+                  git -C "$HOME/riscv-isa-sim" checkout -q --detach "$SPIKE_SHA"
+                  git -C "$HOME/riscv-isa-sim" reset -q --hard "$SPIKE_SHA"
                   test "$(git -C "$HOME/riscv-isa-sim" rev-parse HEAD)" = "$SPIKE_SHA"
-                  test "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)" = ""
-                  mkdir -p "$HOME/riscv-isa-sim/build"
-                  test -x "$HOME/riscv-isa-sim/build/spike" || touch "$HOME/riscv-isa-sim/build/spike"
+                  test -z "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)"
+                  test -z "$(git -C "$HOME/riscv-isa-sim" status --short --untracked-files=no)"
+                  if [ ! -x "$HOME/riscv-isa-sim/build/spike" ] || [ ! -f "$HOME/riscv-isa-sim/build/.source-sha" ] || [ "$(cat "$HOME/riscv-isa-sim/build/.source-sha" 2>/dev/null || true)" != "$SPIKE_SHA" ]; then
+                    rm -rf "$HOME/riscv-isa-sim/build"
+                    mkdir -p "$HOME/riscv-isa-sim/build"
+                    cd "$HOME/riscv-isa-sim/build"
+                    ../configure
+                    make -j"$(nproc)"
+                    printf '%s\\n' "$SPIKE_SHA" > .source-sha
+                  fi
+                  test -x "$HOME/riscv-isa-sim/build/spike"
+                  test "$(cat "$HOME/riscv-isa-sim/build/.source-sha")" = "$SPIKE_SHA"
             """).lstrip(), "      ")
 
     def reference_workflow(self, kind: str) -> str:
@@ -190,6 +210,7 @@ class EvidenceContractTest(unittest.TestCase):
                   - name: Complete architecture traces
                     env:
                       ARCH_TEST: /home/runner/riscv-arch-test
+                      ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
                       SPIKE: /home/runner/riscv-isa-sim/build/spike
                     run: make lockstep
                   - name: Random complete traces
@@ -202,11 +223,12 @@ class EvidenceContractTest(unittest.TestCase):
                   - name: Architecture signatures
                     env:
                       ARCH_TEST: /home/runner/riscv-arch-test
+                      ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
                     run: make compliance
                 """).lstrip(), "      ")
         return (
             self.trigger_block(workflow)
-            + f"\nname: {kind}\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n"
+            + f"\nname: {kind}\n\njobs:\n  {kind}:\n    runs-on: ubuntu-latest\n    steps:\n"
             + self.metadata_step()
             + self.arch_steps()
             + extra
@@ -348,7 +370,7 @@ class EvidenceContractTest(unittest.TestCase):
 
     def test_moving_architecture_checkout_is_rejected(self) -> None:
         workflow = self.reference_workflow("compliance").replace(
-            'git -C "$HOME/riscv-arch-test" fetch --depth 1 origin "$ARCH_TEST_SHA"',
+            'git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"',
             'git clone --branch old-framework-2.x https://github.com/riscv-non-isa/riscv-arch-test.git "$HOME/riscv-arch-test"',
         )
         self.write_workflow("compliance.yml", workflow)
@@ -417,9 +439,223 @@ class EvidenceContractTest(unittest.TestCase):
         self.write_workflow("lockstep.yml", workflow)
         self.assert_contract_failure("Spike cache must retain the verified source/build checkout")
 
+    def test_required_job_cannot_be_disabled(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "  compliance:\n    runs-on:", "  compliance:\n    if: false\n    runs-on:", 1
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance job must not use if")
+
+    def test_contract_must_be_bound_to_the_exact_required_job_name(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "  compliance:\n", "  verify:\n", 1
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance.yml: missing required job compliance")
+
+    def test_compliance_gate_cannot_continue_on_error(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "        run: make compliance",
+            "        continue-on-error: true\n        run: make compliance",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("required step must not use continue-on-error")
+
+    def test_lockstep_gate_cannot_continue_on_error(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "        run: make lockstep",
+            "        continue-on-error: true\n        run: make lockstep",
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("required step must not use continue-on-error")
+
+    def test_lockstep_soak_gate_cannot_continue_on_error(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "        run: make soak-lockstep SEEDS=200",
+            "        continue-on-error: true\n        run: make soak-lockstep SEEDS=200",
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("required step must not use continue-on-error")
+
+    def test_required_gate_step_cannot_be_conditionally_skipped(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "        run: make lockstep",
+            "        if: false\n        run: make lockstep",
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("required step must not use if")
+
+    def test_required_gate_must_be_the_direct_run_scalar(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "        run: make soak-lockstep SEEDS=200",
+            "        run: |\n          ./tools/soak_lockstep.sh 5\n          exit 0\n          make soak-lockstep SEEDS=200",
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure(
+            "lockstep soak gate run must be exactly make soak-lockstep SEEDS=200"
+        )
+
+    def test_required_contract_cannot_be_assembled_across_jobs(self) -> None:
+        full = self.reference_workflow("compliance")
+        prefix, contract = full.split("jobs:\n  compliance:\n", 1)
+        workflow = (
+            prefix
+            + "jobs:\n  compliance:\n    runs-on: ubuntu-latest\n    steps:\n"
+            + "      - run: \"true\"\n"
+            + "  disabled-contract:\n    if: false\n"
+            + contract
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance job is missing its required contract chain")
+
+    def test_reference_setup_must_precede_verification_gate(self) -> None:
+        workflow = self.reference_workflow("compliance")
+        gate = textwrap.indent(textwrap.dedent("""
+              - name: Architecture signatures
+                env:
+                  ARCH_TEST: /home/runner/riscv-arch-test
+                  ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
+                run: make compliance
+            """).lstrip(), "      ")
+        workflow = workflow.replace(gate, "", 1)
+        workflow = workflow.replace(self.metadata_step(), gate + self.metadata_step(), 1)
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance required steps are out of order")
+
+    def test_directed_matrix_job_must_consume_matrix_arguments(self) -> None:
+        workflow = self.rtl_workflow().replace(
+            "run: make all ${{ matrix.args }}", "run: echo matrix configured"
+        )
+        self.write_workflow("rtl-tests.yml", workflow)
+        self.assert_contract_failure(
+            "test-matrix gate run must be exactly make all ${{ matrix.args }}"
+        )
+
+    def test_approved_upstream_url_cannot_have_a_suffix(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "https://github.com/riscv-non-isa/riscv-arch-test.git",
+            "https://github.com/riscv-non-isa/riscv-arch-test.git.evil",
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("architecture-test checkout must use the approved upstream")
+
+    def test_approved_upstream_url_token_cannot_be_embedded_on_wrong_host(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "https://github.com/riscv-software-src/riscv-isa-sim.git",
+            "https://evil.invalid/https://github.com/riscv-software-src/riscv-isa-sim.git",
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("Spike checkout must use the approved upstream")
+
+    def test_architecture_head_verification_must_enforce_equality(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            'test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"',
+            'echo "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" "$ARCH_TEST_SHA"',
+        ).replace(
+            'test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"',
+            'echo "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"',
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("architecture-test setup must exactly verify the pinned checkout")
+
+    def test_negated_path_cannot_neutralize_required_path(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "      - 'rtl/**'\n", "      - 'rtl/**'\n      - '!rtl/**'\n", 1
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("must not negate or duplicate required path rtl/**")
+
+    def test_duplicate_required_path_is_rejected(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "      - 'rtl/**'\n", "      - 'rtl/**'\n      - 'rtl/**'\n", 1
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("must not negate or duplicate required path rtl/**")
+
+    def test_metadata_output_must_expand_the_symbol(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            'echo "arch_test_sha=$ARCH_TEST_SHA" >> "$GITHUB_OUTPUT"',
+            "echo 'arch_test_sha=$ARCH_TEST_SHA' >> \"$GITHUB_OUTPUT\"",
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("metadata step must publish exact expanding output lines")
+
+    def test_split_quoted_pin_is_still_a_literal_duplicate(self) -> None:
+        self.write(
+            "tools/split-pin.sh",
+            f"#!/usr/bin/env bash\nPIN='{self.SPIKE_SHA[:20]}''{self.SPIKE_SHA[20:]}'\nprintf '%s\\n' \"$PIN\"\n",
+            executable=True,
+        )
+        self.assert_contract_failure("literal reference pin duplicated in executable consumer")
+
+    def test_alternate_expected_count_assignment_is_rejected(self) -> None:
+        self.write(
+            "tools/alternate-count.sh",
+            "#!/usr/bin/env bash\nEXPECTED_CASES=7\ntest \"$PASS\" -eq \"$EXPECTED_CASES\"\n",
+            executable=True,
+        )
+        self.assert_contract_failure(
+            "alternate expected architecture count duplicated in executable consumer"
+        )
+
+    def test_hidden_ci_consumer_is_scanned(self) -> None:
+        self.write(
+            ".ci/reference.sh",
+            f"#!/usr/bin/env bash\nPIN={self.ARCH_SHA}\necho \"$PIN\"\n",
+            executable=True,
+        )
+        workflow = self.reference_workflow("compliance").replace(
+            "      - name: Architecture signatures\n",
+            "      - name: Invoke hidden reference helper\n"
+            "        run: ./.ci/reference.sh\n"
+            "      - name: Architecture signatures\n",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("literal reference pin duplicated in executable consumer")
+
+    def test_extensionless_executable_consumer_is_scanned(self) -> None:
+        self.write(
+            "tools/reference-runner",
+            f"#!/usr/bin/env bash\nPIN={self.SPIKE_SHA}\necho \"$PIN\"\n",
+            executable=True,
+        )
+        self.assert_contract_failure("literal reference pin duplicated in executable consumer")
+
+    def test_spike_cached_binary_must_be_bound_to_source_sha_stamp(self) -> None:
+        workflow = self.reference_workflow("lockstep")
+        workflow = workflow.replace(
+            'if [ ! -x "$HOME/riscv-isa-sim/build/spike" ] || [ ! -f "$HOME/riscv-isa-sim/build/.source-sha" ] || [ "$(cat "$HOME/riscv-isa-sim/build/.source-sha" 2>/dev/null || true)" != "$SPIKE_SHA" ]; then',
+            'if [ ! -x "$HOME/riscv-isa-sim/build/spike" ]; then',
+        ).replace(
+            "                    printf '%s\\n' \"$SPIKE_SHA\" > .source-sha\n",
+            "",
+        ).replace(
+            '                  test "$(cat "$HOME/riscv-isa-sim/build/.source-sha")" = "$SPIKE_SHA"\n',
+            "",
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("Spike build must be bound to spike_sha with .source-sha")
+
+    def test_cached_source_must_be_reset_and_verified_clean(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            '          git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"\n',
+            "",
+        ).replace(
+            '          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"\n',
+            "",
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("architecture-test setup must exactly verify the pinned checkout")
+
     def test_architecture_cache_key_must_use_metadata_output(self) -> None:
         workflow = self.reference_workflow("compliance").replace(
-            "key: arch-${{ steps.refs.outputs.arch_test_sha }}",
+            "key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}",
             "key: arch-old-framework-2.x",
         )
         self.write_workflow("compliance.yml", workflow)

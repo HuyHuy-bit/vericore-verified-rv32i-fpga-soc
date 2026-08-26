@@ -79,9 +79,11 @@ jobs:
           git -C "$HOME/riscv-arch-test" remote add origin \
             https://github.com/riscv-non-isa/riscv-arch-test.git
           git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"
-          git -C "$HOME/riscv-arch-test" checkout -q --detach FETCH_HEAD
+          git -C "$HOME/riscv-arch-test" checkout -q --detach "$ARCH_TEST_SHA"
+          git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"
           test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
           test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
+          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"
 
       # Cache the Git checkout and in-tree build together. The lockstep wrappers
       # can then verify the executable's containing repository identity.
@@ -104,16 +106,21 @@ jobs:
           git -C "$HOME/riscv-isa-sim" remote add origin \
             https://github.com/riscv-software-src/riscv-isa-sim.git
           git -C "$HOME/riscv-isa-sim" fetch -q --depth 1 origin "$SPIKE_SHA"
-          git -C "$HOME/riscv-isa-sim" checkout -q --detach FETCH_HEAD
+          git -C "$HOME/riscv-isa-sim" checkout -q --detach "$SPIKE_SHA"
+          git -C "$HOME/riscv-isa-sim" reset -q --hard "$SPIKE_SHA"
           test "$(git -C "$HOME/riscv-isa-sim" rev-parse HEAD)" = "$SPIKE_SHA"
           test -z "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)"
-          if [ ! -x "$HOME/riscv-isa-sim/build/spike" ]; then
+          test -z "$(git -C "$HOME/riscv-isa-sim" status --short --untracked-files=no)"
+          if [ ! -x "$HOME/riscv-isa-sim/build/spike" ] || [ ! -f "$HOME/riscv-isa-sim/build/.source-sha" ] || [ "$(cat "$HOME/riscv-isa-sim/build/.source-sha" 2>/dev/null || true)" != "$SPIKE_SHA" ]; then
+            rm -rf "$HOME/riscv-isa-sim/build"
             mkdir -p "$HOME/riscv-isa-sim/build"
             cd "$HOME/riscv-isa-sim/build"
             ../configure
             make -j"$(nproc)"
+            printf '%s\n' "$SPIKE_SHA" > .source-sha
           fi
           test -x "$HOME/riscv-isa-sim/build/spike"
+          test "$(cat "$HOME/riscv-isa-sim/build/.source-sha")" = "$SPIKE_SHA"
 
       - name: Run complete architecture-test traces against Spike
         env:
