@@ -12,7 +12,7 @@ INSTRS="${2:-60}"
 [[ "$INSTRS" =~ ^[1-9][0-9]*$ ]] \
     || { echo "error: INSTRS must be a positive integer" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SIM="$ROOT/obj_dir/Vcpu"
+SIM="${SIM:-$ROOT/obj_dir/Vcpu}"
 WORK_DIR=""
 
 cleanup() {

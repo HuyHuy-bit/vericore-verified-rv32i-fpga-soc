@@ -570,6 +570,26 @@ class SoakTargetTest(unittest.TestCase):
         self.assertIn("+STOP=tohost", sim_args)
         self.assertNotIn("+STOP=selfloop", sim_args)
 
+    def test_soak_honors_explicit_simulator(self):
+        selected_marker = self.work / "selected-simulator-ran"
+        selected = self.work / "selected-sim"
+        selected.write_text(
+            "#!/usr/bin/env bash\n: > \"$FAKE_SELECTED_SIM_MARKER\"\nexit 0\n"
+        )
+        selected.chmod(0o755)
+        self.env.update({
+            "FAKE_GENERATOR_MODE": "success",
+            "FAKE_SELECTED_SIM_MARKER": str(selected_marker),
+            "SIM": str(selected),
+        })
+        result = subprocess.run(
+            [str(self.repo / "tools/soak.sh"), "1", "5"], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(selected_marker.exists(), result.stdout + result.stderr)
+
 
 class RandomGeneratorContractTest(unittest.TestCase):
     """Keep Python-model and Spike completion mappings explicit and separate."""

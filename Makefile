@@ -170,7 +170,7 @@ lockstep: lockstep-sim
 # golden model (tools/rv32i_model.py). make soak SEEDS=1000
 SEEDS ?= 100
 soak: sim
-	./tools/soak.sh $(SEEDS)
+	SIM="$(CURDIR)/$(SIM)" ./tools/soak.sh $(SEEDS)
 
 # Pinned RV32I architecture-test signature suite.
 compliance: sim
