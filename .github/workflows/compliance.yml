@@ -83,7 +83,7 @@ jobs:
           git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"
           test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
           test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
-          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"
+          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=all)"
 
       - name: Build simulator
         run: make clean && make all

@@ -144,12 +144,13 @@ class EvidenceContractTest(unittest.TestCase):
 
     def arch_steps(self) -> str:
         return textwrap.indent(textwrap.dedent("""
-              - name: Cache architecture tests
+              - name: Cache riscv-arch-test
+                id: arch-test-cache
                 uses: actions/cache@v4
                 with:
                   path: ~/riscv-arch-test
                   key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}
-              - name: Fetch pinned architecture tests
+              - name: Fetch pinned riscv-arch-test checkout
                 env:
                   ARCH_TEST_SHA: ${{ steps.refs.outputs.arch_test_sha }}
                 run: |
@@ -164,12 +165,13 @@ class EvidenceContractTest(unittest.TestCase):
                   git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"
                   test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
                   test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
-                  test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"
+                  test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=all)"
             """).lstrip(), "      ")
 
     def spike_steps(self) -> str:
         return textwrap.indent(textwrap.dedent("""
               - name: Cache Spike source and build
+                id: spike-cache
                 uses: actions/cache@v4
                 with:
                   path: ~/riscv-isa-sim
@@ -189,7 +191,7 @@ class EvidenceContractTest(unittest.TestCase):
                   git -C "$HOME/riscv-isa-sim" reset -q --hard "$SPIKE_SHA"
                   test "$(git -C "$HOME/riscv-isa-sim" rev-parse HEAD)" = "$SPIKE_SHA"
                   test -z "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)"
-                  test -z "$(git -C "$HOME/riscv-isa-sim" status --short --untracked-files=no)"
+                  test -z "$(git -C "$HOME/riscv-isa-sim" status --short --untracked-files=all)"
                   if [ ! -x "$HOME/riscv-isa-sim/build/spike" ] || [ ! -f "$HOME/riscv-isa-sim/build/.source-sha" ] || [ "$(cat "$HOME/riscv-isa-sim/build/.source-sha" 2>/dev/null || true)" != "$SPIKE_SHA" ]; then
                     rm -rf "$HOME/riscv-isa-sim/build"
                     mkdir -p "$HOME/riscv-isa-sim/build"
@@ -206,21 +208,43 @@ class EvidenceContractTest(unittest.TestCase):
         workflow = f"{kind}.yml"
         extra = self.spike_steps() if kind == "lockstep" else ""
         if kind == "lockstep":
+            prefix = textwrap.indent(textwrap.dedent("""
+                  - name: Check out repo
+                    uses: actions/checkout@v4
+                  - name: Install toolchain
+                    run: echo toolchain
+                  - name: Install Verilator (conda-forge)
+                    uses: conda-incubator/setup-miniconda@v3
+                  - name: Install verilator package
+                    run: echo verilator
+                """).lstrip(), "      ")
             gates = textwrap.indent(textwrap.dedent("""
-                  - name: Complete architecture traces
+                  - name: Run complete architecture-test traces against Spike
                     env:
                       ARCH_TEST: /home/runner/riscv-arch-test
                       ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
                       SPIKE: /home/runner/riscv-isa-sim/build/spike
                     run: make lockstep
-                  - name: Random complete traces
+                  - name: Random programs against Spike (with control flow)
                     env:
                       SPIKE: /home/runner/riscv-isa-sim/build/spike
                     run: make soak-lockstep SEEDS=200
                 """).lstrip(), "      ")
         else:
+            prefix = textwrap.indent(textwrap.dedent("""
+                  - name: Check out rv32i-pipeline
+                    uses: actions/checkout@v4
+                  - name: Install RISC-V toolchain
+                    run: echo toolchain
+                  - name: Install Verilator (conda-forge)
+                    uses: conda-incubator/setup-miniconda@v3
+                  - name: Install verilator package
+                    run: echo verilator
+                """).lstrip(), "      ")
             gates = textwrap.indent(textwrap.dedent("""
-                  - name: Architecture signatures
+                  - name: Build simulator
+                    run: echo build
+                  - name: Run compliance suite
                     env:
                       ARCH_TEST: /home/runner/riscv-arch-test
                       ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
@@ -228,7 +252,9 @@ class EvidenceContractTest(unittest.TestCase):
                 """).lstrip(), "      ")
         return (
             self.trigger_block(workflow)
-            + f"\nname: {kind}\n\njobs:\n  {kind}:\n    runs-on: ubuntu-latest\n    steps:\n"
+            + f"\nname: {kind}\n\njobs:\n  {kind}:\n    runs-on: ubuntu-latest\n"
+            + "    defaults:\n      run:\n        shell: bash -l {0}\n    steps:\n"
+            + prefix
             + self.metadata_step()
             + self.arch_steps()
             + extra
@@ -242,9 +268,16 @@ class EvidenceContractTest(unittest.TestCase):
         )
         return (
             self.trigger_block("rtl-tests.yml")
-            + "\nname: RTL Tests\n\njobs:\n  test-matrix:\n    strategy:\n      matrix:\n        include:\n"
+            + "\nname: RTL Tests\n\njobs:\n  test-matrix:\n    runs-on: ubuntu-latest\n"
+            + "    defaults:\n      run:\n        shell: bash -l {0}\n"
+            + "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n"
             + matrix
-            + "\n    steps:\n      - run: make all ${{ matrix.args }}\n"
+            + "\n    steps:\n"
+            + "      - name: Check out repo\n        uses: actions/checkout@v4\n"
+            + "      - name: Install Verilator (conda-forge)\n        uses: conda-incubator/setup-miniconda@v3\n"
+            + "      - name: Install verilator package\n        run: echo verilator\n"
+            + "      - name: Run full test suite (${{ matrix.name }})\n"
+            + "        run: make all ${{ matrix.args }}\n"
         )
 
     def write_workflow(self, name: str, contents: str) -> None:
@@ -516,7 +549,7 @@ class EvidenceContractTest(unittest.TestCase):
     def test_reference_setup_must_precede_verification_gate(self) -> None:
         workflow = self.reference_workflow("compliance")
         gate = textwrap.indent(textwrap.dedent("""
-              - name: Architecture signatures
+              - name: Run compliance suite
                 env:
                   ARCH_TEST: /home/runner/riscv-arch-test
                   ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
@@ -610,10 +643,10 @@ class EvidenceContractTest(unittest.TestCase):
             executable=True,
         )
         workflow = self.reference_workflow("compliance").replace(
-            "      - name: Architecture signatures\n",
+            "      - name: Run compliance suite\n",
             "      - name: Invoke hidden reference helper\n"
             "        run: ./.ci/reference.sh\n"
-            "      - name: Architecture signatures\n",
+            "      - name: Run compliance suite\n",
             1,
         )
         self.write_workflow("compliance.yml", workflow)
@@ -647,11 +680,178 @@ class EvidenceContractTest(unittest.TestCase):
             '          git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"\n',
             "",
         ).replace(
-            '          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=no)"\n',
+            '          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=all)"\n',
             "",
         )
         self.write_workflow("compliance.yml", workflow)
         self.assert_contract_failure("architecture-test setup must exactly verify the pinned checkout")
+
+    def test_quoted_job_if_key_is_rejected(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "  compliance:\n    runs-on:",
+            '  compliance:\n    "if": false\n    runs-on:',
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance job must not use if")
+
+    def test_quoted_step_continue_on_error_key_is_rejected(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "        run: make lockstep",
+            '        "continue-on-error": true\n        run: make lockstep',
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("required step must not use continue-on-error")
+
+    def test_required_job_cannot_need_a_disabled_prerequisite(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "jobs:\n  compliance:\n",
+            "jobs:\n"
+            "  disabled-prerequisite:\n"
+            "    if: false\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo disabled\n"
+            "  compliance:\n"
+            "    needs: disabled-prerequisite\n",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance job has unsupported properties")
+
+    def test_required_step_cannot_override_shell_with_noop(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "        run: make compliance",
+            "        shell: /bin/true {0}\n        run: make compliance",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance gate has unsupported properties")
+
+    def test_required_job_defaults_shell_cannot_be_noop(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "shell: bash -l {0}", "shell: /bin/true {0}", 1
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("lockstep job must use the canonical defaults shell")
+
+    def test_gate_cannot_run_in_a_fake_working_directory(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "        run: make compliance",
+            "        working-directory: fake\n        run: make compliance",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance gate has unsupported properties")
+
+    def test_pull_request_types_cannot_narrow_the_required_trigger(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "  pull_request:\n    paths:",
+            "  pull_request:\n    types: [closed]\n    paths:",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("pull_request event may contain only paths")
+
+    def test_push_branches_ignore_cannot_narrow_the_required_trigger(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "  push:\n    paths:",
+            "  push:\n    branches-ignore:\n      - '**'\n    paths:",
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("push event may contain only paths")
+
+    def test_yaml_anchor_cannot_hide_a_negated_required_path(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "      - 'rtl/**'\n",
+            "      - 'rtl/**'\n      - &drop '!rtl/**'\n",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("event paths must not use YAML anchors or aliases")
+
+    def test_architecture_source_cannot_be_mutated_after_verification(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "      - name: Build simulator\n",
+            "      - name: Mutate architecture source\n"
+            "        run: echo mutation >> /home/runner/riscv-arch-test/README.md\n"
+            "      - name: Build simulator\n",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance job step sequence is not canonical")
+
+    def test_spike_binary_cannot_be_replaced_after_verification(self) -> None:
+        workflow = self.reference_workflow("lockstep").replace(
+            "      - name: Run complete architecture-test traces against Spike\n",
+            "      - name: Replace verified Spike\n"
+            "        run: cp /bin/true /home/runner/riscv-isa-sim/build/spike\n"
+            "      - name: Run complete architecture-test traces against Spike\n",
+            1,
+        )
+        self.write_workflow("lockstep.yml", workflow)
+        self.assert_contract_failure("lockstep job step sequence is not canonical")
+
+    def test_checkout_verification_requires_full_clean_status(self) -> None:
+        workflow = self.reference_workflow("compliance").replace(
+            "status --short --untracked-files=all",
+            "status --short --untracked-files=no",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("architecture-test setup must verify a fully clean checkout")
+
+    def test_alternate_count_assignment_is_rejected_for_any_expression(self) -> None:
+        self.write(
+            "tools/alternate-expression.sh",
+            "#!/usr/bin/env bash\nEXPECTED_CASES=$((19*2))\necho \"$EXPECTED_CASES\"\n",
+            executable=True,
+        )
+        self.assert_contract_failure(
+            "alternate expected architecture count assignment in executable consumer"
+        )
+
+    def test_literal_expected_count_is_rejected_for_any_variable_name(self) -> None:
+        self.write_metadata(
+            f"ARCH_TEST_SHA={self.ARCH_SHA}\n"
+            "ARCH_TEST_EXPECTED=38\n"
+            f"SPIKE_SHA={self.SPIKE_SHA}\n"
+        )
+        self.write(
+            "tools/opaque-count.sh",
+            "#!/usr/bin/env bash\nN=38\necho \"$N\"\n",
+            executable=True,
+        )
+        self.assert_contract_failure(
+            "literal expected architecture count duplicated in executable consumer"
+        )
+
+    def test_pin_split_across_append_assignments_is_rejected(self) -> None:
+        self.write(
+            "tools/appended-pin.sh",
+            f"#!/usr/bin/env bash\nPIN={self.SPIKE_SHA[:20]}\n"
+            f"PIN+={self.SPIKE_SHA[20:]}\necho \"$PIN\"\n",
+            executable=True,
+        )
+        self.assert_contract_failure("literal reference pin duplicated in executable consumer")
+
+    def test_excluded_worktree_consumer_cannot_be_invoked_by_required_job(self) -> None:
+        self.write(
+            ".claude/worktrees/stale/pinned-helper.sh",
+            f"#!/usr/bin/env bash\nPIN={self.ARCH_SHA}\necho \"$PIN\"\n",
+            executable=True,
+        )
+        workflow = self.reference_workflow("compliance").replace(
+            "      - name: Build simulator\n",
+            "      - name: Invoke excluded helper\n"
+            "        run: ./.claude/worktrees/stale/pinned-helper.sh\n"
+            "      - name: Build simulator\n",
+            1,
+        )
+        self.write_workflow("compliance.yml", workflow)
+        self.assert_contract_failure("compliance job step sequence is not canonical")
 
     def test_architecture_cache_key_must_use_metadata_output(self) -> None:
         workflow = self.reference_workflow("compliance").replace(
