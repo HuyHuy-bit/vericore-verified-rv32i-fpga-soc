@@ -8,6 +8,7 @@ ARG VERILATOR_VERSION
 ARG VERILATOR_URL
 ARG VERILATOR_SHA256
 ARG RISCV_TOOLCHAIN_VERSION
+ARG RISCV_BINUTILS_VERSION
 ARG RISCV_TOOLCHAIN_URL
 ARG RISCV_TOOLCHAIN_SHA256
 ARG PYTHON_VERSION
@@ -38,7 +39,7 @@ RUN curl -fsSL "$RISCV_TOOLCHAIN_URL" -o /tmp/riscv-toolchain.tar.gz \
     && printf '%s  %s\n' "$RISCV_TOOLCHAIN_SHA256" /tmp/riscv-toolchain.tar.gz | sha256sum -c - \
     && tar -xzf /tmp/riscv-toolchain.tar.gz -C /opt \
     && test "$(/opt/riscv/bin/riscv64-unknown-elf-gcc -dumpfullversion)" = "${RISCV_TOOLCHAIN_VERSION%%-*}" \
-    && test "$(/opt/riscv/bin/riscv64-unknown-elf-as --version | sed -n '1s/.* //p')" = "2.42"
+    && test "$(/opt/riscv/bin/riscv64-unknown-elf-as --version | sed -n '1s/.* //p')" = "$RISCV_BINUTILS_VERSION"
 
 RUN mkdir -p /opt/rv32i-cache \
     && printf '{"schema":%s,"image_revision":%s}\n' "$ENV_SCHEMA" "$VERIFY_IMAGE_REVISION" > /opt/rv32i/environment.json

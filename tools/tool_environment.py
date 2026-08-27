@@ -21,6 +21,7 @@ TOOL_KEYS = (
     "VERILATOR_URL",
     "VERILATOR_SHA256",
     "RISCV_TOOLCHAIN_VERSION",
+    "RISCV_BINUTILS_VERSION",
     "RISCV_TOOLCHAIN_URL",
     "RISCV_TOOLCHAIN_SHA256",
     "PYTHON_VERSION",
@@ -91,7 +92,7 @@ def validate_manifest(values: Mapping[str, str]) -> list[str]:
     for key in ("VERILATOR_SHA256", "RISCV_TOOLCHAIN_SHA256", "VHS_SHA256"):
         if SHA256_RE.fullmatch(values[key]) is None:
             errors.append(f"{key} must be 64 lowercase hexadecimal characters")
-    for key in ("VERILATOR_VERSION", "RISCV_TOOLCHAIN_VERSION", "PYTHON_VERSION", "VHS_VERSION", "FFMPEG_VERSION"):
+    for key in ("VERILATOR_VERSION", "RISCV_TOOLCHAIN_VERSION", "RISCV_BINUTILS_VERSION", "PYTHON_VERSION", "VHS_VERSION", "FFMPEG_VERSION"):
         if VERSION_RE.fullmatch(values[key]) is None:
             errors.append(f"{key} is not canonical")
     for prefix in ("VERILATOR", "RISCV_TOOLCHAIN", "VHS"):
@@ -174,7 +175,7 @@ def inspect_native(
         (("python3", "--version"), f"Python {values['PYTHON_VERSION']}"),
         (("verilator", "--version"), f"Verilator {values['VERILATOR_VERSION']}"),
         (("riscv64-unknown-elf-gcc", "--version"), values["RISCV_TOOLCHAIN_VERSION"].split("-", 1)[0]),
-        (("riscv64-unknown-elf-as", "--version"), "2.42"),
+        (("riscv64-unknown-elf-as", "--version"), values["RISCV_BINUTILS_VERSION"]),
     )
     for command, expected in probes:
         rc, output = command_output(command)

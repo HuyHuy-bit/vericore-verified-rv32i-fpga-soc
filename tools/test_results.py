@@ -48,6 +48,7 @@ class ResultSetTest(unittest.TestCase):
             "UBUNTU_DIGEST=sha256:" + "c" * 64 + "\n"
             "VERILATOR_VERSION=5.048\n"
             "RISCV_TOOLCHAIN_VERSION=13.2.0-2024.04.12\n"
+            "RISCV_BINUTILS_VERSION=2.42\n"
             "PYTHON_VERSION=3.12\n"
             "VHS_VERSION=0.11.0\n"
             "FFMPEG_VERSION=6.1.1\n"
@@ -351,6 +352,13 @@ class ResultSetTest(unittest.TestCase):
         self.write_json("tool_versions.json", value)
         self.refresh_manifest()
         self.assertTrue(any("architecture-test commit" in error for error in validate_result_set(self.results, self.checkout)))
+
+    def test_assembler_version_mismatch_is_rejected(self) -> None:
+        value = self.tool_versions()
+        value["riscv_as"] = "2.41"
+        self.write_json("tool_versions.json", value)
+        self.refresh_manifest()
+        self.assertTrue(any("assembler version" in error for error in validate_result_set(self.results, self.checkout)))
 
     def test_collection_publishes_only_a_complete_set(self) -> None:
         output = self.checkout / "published"
