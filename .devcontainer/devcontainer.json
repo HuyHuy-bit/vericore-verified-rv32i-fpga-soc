@@ -1,0 +1,21 @@
+{
+  "name": "RV32I verification",
+  "build": {
+    "context": "..",
+    "dockerfile": "../containers/verify/Dockerfile",
+    "target": "verify",
+    "args": {
+      "ENV_SCHEMA": "1",
+      "VERILATOR_VERSION": "5.048",
+      "VERILATOR_URL": "https://github.com/verilator/verilator/archive/refs/tags/v5.048.tar.gz",
+      "VERILATOR_SHA256": "02d934b3f972c6d9b792350634d81eadfc9e61f347e3f3bdcaad40960b9fcb53",
+      "RISCV_TOOLCHAIN_VERSION": "13.2.0-2024.04.12",
+      "RISCV_TOOLCHAIN_URL": "https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2024.04.12/riscv64-elf-ubuntu-22.04-gcc-nightly-2024.04.12-nightly.tar.gz",
+      "RISCV_TOOLCHAIN_SHA256": "63acc9cb0fd9924b0361ed65a4fbafd9f334cae085c7267b134bd1696d97ca6a",
+      "PYTHON_VERSION": "3.12",
+      "VERIFY_IMAGE_REVISION": "1"
+    }
+  },
+  "workspaceFolder": "/work",
+  "remoteUser": "root"
+}

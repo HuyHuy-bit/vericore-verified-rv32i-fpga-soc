@@ -25,3 +25,5 @@ syn/*.hw/
 syn/*.ip_user_files/
 syn/*.runs/
 syn/out_*/
+.verify-cache/
+.portfolio-runs/

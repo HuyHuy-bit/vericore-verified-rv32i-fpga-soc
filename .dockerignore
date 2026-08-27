@@ -1,0 +1,16 @@
+.git/
+.claude/
+.superpowers/
+docs/superpowers/
+obj_dir*
+coverage/
+syn/reports/
+syn/.synth-reports-*/
+graphify-out/
+__pycache__/
+*.vcd
+*.elf
+*.dcp
+*.jou
+*.log
+*.rpt
