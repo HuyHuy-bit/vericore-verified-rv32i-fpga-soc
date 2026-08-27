@@ -78,15 +78,18 @@ class MakeConfigurationTest(unittest.TestCase):
         self.assertIn("obj_dir_ic0_4_1_dc4096_4_4_0_L1_10_bp6_10_0_8/Vcpu", source)
 
     def test_ci_has_the_three_predictor_configurations(self):
-        source = (ROOT / ".github/workflows/rtl-tests.yml").read_text(encoding="utf-8")
-        self.assertIn("predictor-matrix:", source)
-        for name, arguments in (
-            ("gshare", "GSHARE=1"),
-            ("no-ras", "RAS_DEPTH=0"),
-            ("small-btb", "BTB_IDX_BITS=4 BTB_TAG_BITS=6"),
+        workflow = (ROOT / ".github/workflows/rtl-tests.yml").read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn(
+            "python3 tools/verification.py container --profile directed-predictor",
+            workflow,
+        )
+        for arguments in (
+            "GSHARE=1",
+            "RAS_DEPTH=0",
+            "BTB_IDX_BITS=4 BTB_TAG_BITS=6",
         ):
-            self.assertIn(f"name: {name}", source)
-            self.assertIn(f'args: "{arguments}"', source)
+            self.assertIn(f"$(MAKE) --no-print-directory all {arguments}", makefile)
 
 
 if __name__ == "__main__":

@@ -115,7 +115,7 @@ class ContainerCommandTest(unittest.TestCase):
         self.assertEqual(command[:3], ("docker", "build", "--target"))
         self.assertIn("demo", command)
         self.assertIn("containers/verify/Dockerfile", command)
-        self.assertTrue(command[-1].endswith("rv32i-pipeline"))
+        self.assertEqual(command[-1], str(ROOT.resolve()))
         self.assertIn("ghcr.io/huyhuy-bit/rv32i-verify:1-demo", command)
 
     def test_container_mounts_source_and_private_cache(self):
