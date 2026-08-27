@@ -196,7 +196,7 @@ soak-lockstep: lockstep-sim
 	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/soak_lockstep.sh $(SEEDS)
 
 REPORT_DIR ?= syn/reports
-RTL_COMMIT ?= 87378e281435056fd1bd3dfb57f9c212dca82bb7
+RTL_COMMIT ?= c0a95a3a4a33d3f5611f017cb9b8c454f1d13319
 synth-matrix:
 	VIVADO="$(VIVADO)" python3 syn/run_synth.py --report-dir "$(REPORT_DIR)" --rtl-commit "$(RTL_COMMIT)"
 
