@@ -127,6 +127,7 @@ class ContainerCommandTest(unittest.TestCase):
         self.assertIn(f"{root / '.verify-cache'}:/opt/rv32i-cache", command)
         self.assertIn("HOST_UID=123", command)
         self.assertIn("HOST_GID=456", command)
+        self.assertIn("REFERENCE_CACHE=/opt/rv32i-cache", command)
         self.assertEqual(command[-4:], ("--profile", "fast", "--inside-container", "1"))
 
 

@@ -202,6 +202,7 @@ def docker_run_command(
         "--env", f"HOST_GID={group_id}",
         "--env", "ARCH_TEST=/opt/rv32i-cache/riscv-arch-test",
         "--env", "SPIKE=/opt/rv32i-cache/riscv-isa-sim/build/spike",
+        "--env", "REFERENCE_CACHE=/opt/rv32i-cache",
         "--volume", f"{root.resolve()}:/work",
         "--volume", f"{cache}:/opt/rv32i-cache",
         "--workdir", "/work",
@@ -230,6 +231,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     try:
         if args.mode == "run":
+            if args.inside_container == "1":
+                status = run_commands(
+                    (Command("prepare-references", ("python3", "tools/prepare_references.py"), 7200),),
+                    root,
+                    {},
+                )
+                if status != 0:
+                    return status
             return run_commands(commands_for(args.profile, root), root, {})
         build = build_image_command(root, args.target)
         if invoke(build, root, 7200) != 0:
