@@ -96,3 +96,41 @@ jobs:
 
       - name: Run full test suite (${{ matrix.name }})
         run: make all ${{ matrix.args }}
+
+  predictor-matrix:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gshare
+            args: "GSHARE=1"
+            metric: "make focused-test TEST=t21_gshare_correlated FOCUSED_REF=tests/predictor/t21_gshare.ref GSHARE=1"
+          - name: no-ras
+            args: "RAS_DEPTH=0"
+            metric: "make focused-test TEST=t20_ras_multi_caller FOCUSED_REF=tests/predictor/t20_no_ras.ref RAS_DEPTH=0"
+          - name: small-btb
+            args: "BTB_IDX_BITS=4 BTB_TAG_BITS=6"
+            metric: "make config-check BTB_IDX_BITS=4 BTB_TAG_BITS=6"
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install Verilator (conda-forge)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          channel-priority: strict
+
+      - name: Install verilator package
+        run: mamba install -y -c conda-forge verilator
+
+      - name: Run predictor suite (${{ matrix.name }})
+        run: make all ${{ matrix.args }}
+
+      - name: Check predictor metrics (${{ matrix.name }})
+        run: ${{ matrix.metric }}

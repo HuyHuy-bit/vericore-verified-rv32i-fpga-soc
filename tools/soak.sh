@@ -7,11 +7,18 @@ set -u
 
 SEEDS="${1:-100}"
 INSTRS="${2:-60}"
+BTB_IDX_BITS="${BTB_IDX_BITS:-6}"
+BTB_TAG_BITS="${BTB_TAG_BITS:-10}"
+GSHARE="${GSHARE:-0}"
+RAS_DEPTH="${RAS_DEPTH:-8}"
 [[ "$SEEDS" =~ ^[1-9][0-9]*$ ]] \
     || { echo "error: SEEDS must be a positive integer" >&2; exit 1; }
 [[ "$INSTRS" =~ ^[1-9][0-9]*$ ]] \
     || { echo "error: INSTRS must be a positive integer" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+/usr/bin/python3 "$ROOT/tools/configuration.py" --btb-idx-bits "$BTB_IDX_BITS" \
+    --btb-tag-bits "$BTB_TAG_BITS" --gshare "$GSHARE" --ras-depth "$RAS_DEPTH" \
+    || exit 1
 SIM="${SIM:-$ROOT/obj_dir/Vcpu}"
 WORK_DIR=""
 

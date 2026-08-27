@@ -31,6 +31,10 @@ DC_BYTES="${DC_BYTES:-0}"
 DC_BLOCK="${DC_BLOCK:-4}"
 DC_WAYS="${DC_WAYS:-1}"
 DC_WB="${DC_WB:-0}"
+BTB_IDX_BITS="${BTB_IDX_BITS:-6}"
+BTB_TAG_BITS="${BTB_TAG_BITS:-10}"
+GSHARE="${GSHARE:-0}"
+RAS_DEPTH="${RAS_DEPTH:-8}"
 
 KERNELS=(crc32 matmul sort llist interp)
 
@@ -59,6 +63,9 @@ trap cleanup EXIT
 [[ "$DC_BLOCK" =~ ^[1-9][0-9]*$ ]] || die "DC_BLOCK must be a positive integer"
 [[ "$DC_WAYS" =~ ^[1-9][0-9]*$ ]] || die "DC_WAYS must be a positive integer"
 [[ "$DC_WB" = 0 || "$DC_WB" = 1 ]] || die "DC_WB must be 0 or 1"
+/usr/bin/python3 "$ROOT/tools/configuration.py" --btb-idx-bits "$BTB_IDX_BITS" \
+    --btb-tag-bits "$BTB_TAG_BITS" --gshare "$GSHARE" --ras-depth "$RAS_DEPTH" \
+    || exit 1
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-bench.XXXXXX") \
     || die "could not create benchmark work directory"
@@ -72,7 +79,7 @@ elif [ "$LATENCY" -le 1 ] && [ "$IC_BYTES" -eq 0 ] && [ "$DC_BYTES" -eq 0 ]; the
         exit 1
     fi
 else
-    OBJ="$ROOT/obj_dir_L${LATENCY}_ic${IC_BYTES}_${IC_BLOCK}_${IC_WAYS}_dc${DC_BYTES}_${DC_BLOCK}_${DC_WAYS}_${DC_WB}"
+    OBJ="$ROOT/obj_dir_L${LATENCY}_ic${IC_BYTES}_${IC_BLOCK}_${IC_WAYS}_dc${DC_BYTES}_${DC_BLOCK}_${DC_WAYS}_${DC_WB}_bp${BTB_IDX_BITS}_${BTB_TAG_BITS}_${GSHARE}_${RAS_DEPTH}"
     SIM="$OBJ/Vcpu"
     # Builds are cached per configuration, so an RTL edit that doesn't change
     # the configuration would otherwise be measured with a stale binary and
@@ -86,6 +93,8 @@ else
             -GICACHE_WAYS="$IC_WAYS" \
             -GDCACHE_BYTES="$DC_BYTES" -GDCACHE_BLOCK_WORDS="$DC_BLOCK" \
             -GDCACHE_WAYS="$DC_WAYS" -GDCACHE_WRITE_BACK="$DC_WB" \
+            -GBTB_IDX_BITS="$BTB_IDX_BITS" -GBTB_TAG_BITS="$BTB_TAG_BITS" \
+            -GGSHARE="$GSHARE" -GRAS_DEPTH="$RAS_DEPTH" \
             --Mdir "$OBJ" \
             "$ROOT"/rtl/rv32i_pkg.sv $(ls "$ROOT"/rtl/*.sv | grep -v rv32i_pkg.sv) "$ROOT/cpu_tb.cpp" \
             > "$WORK/build.log" 2>&1 || { cat "$WORK/build.log" >&2; exit 1; }
@@ -99,6 +108,7 @@ if [ "$DC_BYTES" -ne 0 ]; then
     dcdesc="${DC_BYTES}B ${DC_BLOCK}w ${DC_WAYS}-way $pol"
 fi
 echo "memory latency: $LATENCY cycle(s) | I-cache: $icdesc | D-cache: $dcdesc"
+echo "predictor: BTB=$BTB_IDX_BITS/$BTB_TAG_BITS gshare=$GSHARE RAS=$RAS_DEPTH"
 
 printf '%-10s %10s %10s %7s %10s %9s %10s %10s\n' \
        kernel cycles instret CPI memstall bpred-acc ic-hitrate dc-hitrate

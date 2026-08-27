@@ -178,7 +178,7 @@ class HarnessTest(unittest.TestCase):
         result = self.invoke("+STOP=tohost", "+CYCLES=20", f"+REFFILE={ref}")
         self.assert_failure(
             result,
-            "error: reference file has no register or stalls expectations",
+            "error: reference file has no register, stall, or predictor expectations",
         )
 
     def test_cycles_only_reference_is_valid_metadata_with_an_rvfi_consumer(self):
@@ -321,6 +321,36 @@ class HarnessTest(unittest.TestCase):
             timeout=20,
         )
         self.assert_failure(result, "error: reference mismatch for stalls")
+
+    def test_predictor_metrics_are_checked(self):
+        ref = self.write("predictor.ref", "cycles=20\nbranches=0\nmispredicts=0\n")
+        result = self.invoke("+STOP=tohost", "+CYCLES=20", f"+REFFILE={ref}")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PASS  branches", result.stdout)
+        self.assertIn("PASS  mispredicts", result.stdout)
+
+    def test_mismatched_predictor_metrics_are_failures(self):
+        for key in ("branches", "mispredicts"):
+            with self.subTest(key=key):
+                ref = self.write(f"wrong-{key}.ref", f"cycles=20\n{key}=1\n")
+                result = self.invoke("+STOP=tohost", "+CYCLES=20", f"+REFFILE={ref}")
+                self.assert_failure(result, f"error: reference mismatch for {key}")
+
+    def test_duplicate_predictor_metrics_are_rejected(self):
+        for key in ("branches", "mispredicts"):
+            with self.subTest(key=key):
+                self.reference_failure(
+                    f"cycles=20\n{key}=0\n{key}=1\n",
+                    f"error: duplicate reference key: {key}",
+                )
+
+    def test_invalid_predictor_metric_values_are_rejected(self):
+        for entry in ("branches=-1", "mispredicts=4294967296"):
+            with self.subTest(entry=entry):
+                self.reference_failure(
+                    f"cycles=20\n{entry}\n",
+                    "error: invalid unsigned reference value",
+                )
 
     def test_verification_cycle_budget_allows_directed_tohost_headroom(self):
         """The legacy reference value remains an explicit verified-run budget."""
@@ -483,6 +513,7 @@ class SoakTargetTest(unittest.TestCase):
         (self.repo / "tools").mkdir(parents=True)
         (self.repo / "obj_dir").mkdir()
         shutil.copy2(ROOT / "tools/soak.sh", self.repo / "tools/soak.sh")
+        shutil.copy2(ROOT / "tools/configuration.py", self.repo / "tools/configuration.py")
         (self.repo / "tools/rand_gen.py").write_text("")
         self.sim_marker = self.work / "simulator-ran"
         self.generator_marker = self.work / "generator-ran"
@@ -796,7 +827,9 @@ class BenchmarkRunnerTest(unittest.TestCase):
         (self.repo / "compliance/link").mkdir(parents=True)
         (self.repo / "obj_dir").mkdir()
         (self.repo / "rtl").mkdir()
+        (self.repo / "tools").mkdir()
         shutil.copy2(ROOT / "bench/run_bench.sh", self.repo / "bench/run_bench.sh")
+        shutil.copy2(ROOT / "tools/configuration.py", self.repo / "tools/configuration.py")
         for name in ("host_main.c", "crt0.S"):
             (self.repo / "bench" / name).write_text("placeholder\n")
         for kernel in self.KERNELS:
@@ -953,7 +986,7 @@ exec "$FAKE_FALLBACK_SIM" "$@"
             cwd=ROOT, text=True, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=10,
         )
-        expected = ROOT / "obj_dir_ic1024_4_4_dc4096_4_4_1_L10_10/Vcpu"
+        expected = ROOT / "obj_dir_ic1024_4_4_dc4096_4_4_1_L10_10_bp6_10_0_8/Vcpu"
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(f'SIM="{expected}"', result.stdout)
 

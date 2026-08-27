@@ -45,13 +45,12 @@ module branch_predictor #(
     function automatic logic [TAG_BITS-1:0] tag_of(input logic [XLEN-1:0] pc);
         tag_of = pc[IDX_BITS+1+TAG_BITS : IDX_BITS+2];
     endfunction
-    // gshare hash: PC index XOR history, history right-aligned into the low
-    // bits. GHIST_BITS <= IDX_BITS is enforced below.
+    // gshare hash: PC index XOR history, resized to the index width.
     function automatic logic [IDX_BITS-1:0] bht_idx_of(
         input logic [XLEN-1:0]    pc,
         input logic [GHIST_BITS-1:0] hist
     );
-        if (GSHARE != 0) bht_idx_of = idx_of(pc) ^ {{(IDX_BITS-GHIST_BITS){1'b0}}, hist};
+        if (GSHARE != 0) bht_idx_of = idx_of(pc) ^ IDX_BITS'(hist);
         else        bht_idx_of = idx_of(pc);
     endfunction
 

@@ -23,6 +23,8 @@ enum class RunMode { Tohost, SelfLoop, Snapshot };
 struct Reference {
     uint32_t cycles = 0;
     std::optional<uint32_t> stalls;
+    std::optional<uint32_t> branches;
+    std::optional<uint32_t> mispredicts;
     std::array<std::optional<uint32_t>, 32> regs;
 };
 
@@ -83,6 +85,7 @@ static bool load_reference(const std::string& path, Reference& reference) {
     std::ifstream file(path);
     if (!file) { std::cerr << "error: cannot read reference file: " << path << "\n"; return false; }
     bool saw_entry = false, saw_cycles = false, saw_stalls = false;
+    bool saw_branches = false, saw_mispredicts = false;
     std::string line;
     while (std::getline(file, line)) {
         line = trim(line);
@@ -95,7 +98,8 @@ static bool load_reference(const std::string& path, Reference& reference) {
         const std::string key = trim(line.substr(0, equal));
         const std::string value_text = trim(line.substr(equal + 1));
         uint32_t value = 0;
-        if (key == "cycles" || key == "stalls" || (!key.empty() && key[0] == 'x')) {
+        if (key == "cycles" || key == "stalls" || key == "branches" || key == "mispredicts"
+            || (!key.empty() && key[0] == 'x')) {
             if (!parse_u32(value_text, value)) {
                 if (looks_like_unsigned_number(value_text))
                     std::cerr << "error: invalid unsigned reference value: " << value_text << "\n";
@@ -110,6 +114,12 @@ static bool load_reference(const std::string& path, Reference& reference) {
         } else if (key == "stalls") {
             if (saw_stalls) { std::cerr << "error: duplicate reference key: stalls\n"; return false; }
             reference.stalls = value; saw_stalls = true;
+        } else if (key == "branches") {
+            if (saw_branches) { std::cerr << "error: duplicate reference key: branches\n"; return false; }
+            reference.branches = value; saw_branches = true;
+        } else if (key == "mispredicts") {
+            if (saw_mispredicts) { std::cerr << "error: duplicate reference key: mispredicts\n"; return false; }
+            reference.mispredicts = value; saw_mispredicts = true;
         } else if (!key.empty() && key[0] == 'x') {
             if (key.size() == 1 || !std::all_of(key.begin() + 1, key.end(), [](unsigned char c) { return std::isdigit(c); })) {
                 std::cerr << "error: malformed reference entry: " << line << "\n";
@@ -189,6 +199,7 @@ int main(int argc, char** argv) {
     if (!reffile.empty() && !load_reference(reffile, reference)) return 1;
 
     const bool reference_checks = reference.stalls.has_value()
+        || reference.branches.has_value() || reference.mispredicts.has_value()
         || std::any_of(reference.regs.begin(), reference.regs.end(),
                        [](const auto& expected) { return expected.has_value(); });
 
@@ -225,7 +236,7 @@ int main(int argc, char** argv) {
         }
     }
     if (verify && !reference_checks && sigfile.empty() && rvfifile.empty()) {
-        std::cerr << "error: reference file has no register or stalls expectations\n";
+        std::cerr << "error: reference file has no register, stall, or predictor expectations\n";
         return 1;
     }
 
@@ -332,6 +343,10 @@ int main(int argc, char** argv) {
         }
         if (reference.stalls.has_value() && pc_snap.stalls != *reference.stalls) { fail("reference mismatch for stalls"); std::cout << "  FAIL  stalls\n"; }
         else if (reference.stalls.has_value()) std::cout << "  PASS  stalls\n";
+        if (reference.branches.has_value() && pc_snap.branches != *reference.branches) { fail("reference mismatch for branches"); std::cout << "  FAIL  branches\n"; }
+        else if (reference.branches.has_value()) std::cout << "  PASS  branches\n";
+        if (reference.mispredicts.has_value() && pc_snap.mispred != *reference.mispredicts) { fail("reference mismatch for mispredicts"); std::cout << "  FAIL  mispredicts\n"; }
+        else if (reference.mispredicts.has_value()) std::cout << "  PASS  mispredicts\n";
     }
     const double cpi = pc_snap.instret ? static_cast<double>(pc_snap.cyc) / pc_snap.instret : 0.0;
     const double accuracy = pc_snap.branches ? 100.0 * static_cast<double>(pc_snap.branches - pc_snap.mispred) / pc_snap.branches : 0.0;

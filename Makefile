@@ -20,20 +20,27 @@ DC_WAYS  ?= 1
 DC_WB    ?= 0
 IMEM_LAT ?= 1
 DMEM_LAT ?= 1
+BTB_IDX_BITS ?= 6
+BTB_TAG_BITS ?= 10
+GSHARE ?= 0
+RAS_DEPTH ?= 8
 
 GPARAMS  = -GIMEM_LATENCY=$(IMEM_LAT) -GDMEM_LATENCY=$(DMEM_LAT) \
            -GICACHE_BYTES=$(IC_BYTES) -GICACHE_BLOCK_WORDS=$(IC_BLOCK) -GICACHE_WAYS=$(IC_WAYS) \
            -GDCACHE_BYTES=$(DC_BYTES) -GDCACHE_BLOCK_WORDS=$(DC_BLOCK) -GDCACHE_WAYS=$(DC_WAYS) \
-           -GDCACHE_WRITE_BACK=$(DC_WB)
+           -GDCACHE_WRITE_BACK=$(DC_WB) \
+           -GBTB_IDX_BITS=$(BTB_IDX_BITS) -GBTB_TAG_BITS=$(BTB_TAG_BITS) \
+           -GGSHARE=$(GSHARE) -GRAS_DEPTH=$(RAS_DEPTH)
 
 VFLAGS   = --cc --exe --build --trace --assert --timing -j 0
 # The all-defaults config keeps the plain "obj_dir" name other scripts (e.g.
 # bench/run_bench.sh) already expect; any non-default config gets its own dir
 # so configs don't clobber each other's cached build.
-ifeq ($(IC_BYTES)$(IC_BLOCK)$(IC_WAYS)$(DC_BYTES)$(DC_BLOCK)$(DC_WAYS)$(DC_WB)$(IMEM_LAT)$(DMEM_LAT),041041011)
+CONFIG_ID = $(IC_BYTES):$(IC_BLOCK):$(IC_WAYS):$(DC_BYTES):$(DC_BLOCK):$(DC_WAYS):$(DC_WB):$(IMEM_LAT):$(DMEM_LAT):$(BTB_IDX_BITS):$(BTB_TAG_BITS):$(GSHARE):$(RAS_DEPTH)
+ifeq ($(CONFIG_ID),0:4:1:0:4:1:0:1:1:6:10:0:8)
 OBJDIR   = obj_dir
 else
-OBJDIR   = obj_dir_ic$(IC_BYTES)_$(IC_BLOCK)_$(IC_WAYS)_dc$(DC_BYTES)_$(DC_BLOCK)_$(DC_WAYS)_$(DC_WB)_L$(IMEM_LAT)_$(DMEM_LAT)
+OBJDIR   = obj_dir_ic$(IC_BYTES)_$(IC_BLOCK)_$(IC_WAYS)_dc$(DC_BYTES)_$(DC_BLOCK)_$(DC_WAYS)_$(DC_WB)_L$(IMEM_LAT)_$(DMEM_LAT)_bp$(BTB_IDX_BITS)_$(BTB_TAG_BITS)_$(GSHARE)_$(RAS_DEPTH)
 endif
 SIM      = $(OBJDIR)/V$(TOP)
 ASM      = python3 tools/asm.py
@@ -46,13 +53,21 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
 
+config-check:
+	@python3 tools/configuration.py --btb-idx-bits "$(BTB_IDX_BITS)" \
+		--btb-tag-bits "$(BTB_TAG_BITS)" --gshare "$(GSHARE)" \
+		--ras-depth "$(RAS_DEPTH)"
+
+config-id: config-check
+	@echo "$(OBJDIR)"
+
 # Build the simulator binary.
-sim: $(SIM)
+sim: config-check $(SIM)
 $(SIM): $(CPU_SRCS) $(TB)
 	verilator $(VFLAGS) $(GPARAMS) --Mdir $(OBJDIR) --top-module $(TOP) $(CPU_SRCS) $(TB)
 
@@ -95,18 +110,41 @@ test: sim assemble memtiming
 	echo "========== $$PASS/$$((PASS+FAIL)) tests passed =========="; \
 	[ $$FAIL -eq 0 ]
 
+FOCUSED_REF ?= tests/$(TEST).ref
+focused-test: sim assemble
+	@CYCS=$$(grep '^cycles=' "$(FOCUSED_REF)" | cut -d= -f2); \
+	./$(SIM) +MEMFILE=tests/$(TEST).hex +REFFILE="$(FOCUSED_REF)" \
+		+STOP=tohost +CYCLES=$$CYCS +VCD=
+
+predictor-metrics:
+	@$(MAKE) --no-print-directory focused-test TEST=t20_ras_multi_caller \
+		FOCUSED_REF=tests/predictor/t20_default.ref
+	@$(MAKE) --no-print-directory focused-test TEST=t20_ras_multi_caller \
+		FOCUSED_REF=tests/predictor/t20_no_ras.ref RAS_DEPTH=0
+	@$(MAKE) --no-print-directory focused-test TEST=t21_gshare_correlated \
+		FOCUSED_REF=tests/predictor/t21_bimodal.ref
+	@$(MAKE) --no-print-directory focused-test TEST=t21_gshare_correlated \
+		FOCUSED_REF=tests/predictor/t21_gshare.ref GSHARE=1
+
+predictor-test:
+	@$(MAKE) --no-print-directory all GSHARE=1
+	@$(MAKE) --no-print-directory all RAS_DEPTH=0
+	@$(MAKE) --no-print-directory all BTB_IDX_BITS=4 BTB_TAG_BITS=6
+	@$(MAKE) --no-print-directory predictor-metrics
+
 # Dependency-free black-box checks for simulator argument, completion, and
 # result-consumer contracts.  The target builds the simulator first because
 # the fixtures invoke the real binary.
 harness-test: sim
 	python3 tools/test_harness.py
 	python3 -m unittest -v tools.test_arch_compat
+	python3 -m unittest -v tools.test_tool_environment tools.test_configuration tools.test_verification
 	@$(MAKE) --no-print-directory sim IC_BYTES=0 DC_BYTES=4096 DC_WAYS=4 DC_WB=0 IMEM_LAT=1 DMEM_LAT=10
-	SIM="$(CURDIR)/obj_dir_ic0_4_1_dc4096_4_4_0_L1_10/Vcpu" \
+	SIM="$(CURDIR)/obj_dir_ic0_4_1_dc4096_4_4_0_L1_10_bp6_10_0_8/Vcpu" \
 		python3 -m unittest -v tools.test_harness.HarnessTest.test_tohost_bypasses_dcache
 
 evidence-check:
-	python3 -m unittest -v tools.test_tool_environment tools.test_verification tools.test_evidence_check
+	python3 -m unittest -v tools.test_evidence_check
 	python3 tools/evidence_check.py
 
 check: unit harness-test lint evidence-check
@@ -136,6 +174,8 @@ bench: sim
 	@SIM="$(CURDIR)/$(SIM)" LATENCY="$(IMEM_LAT)" \
 		IC_BYTES="$(IC_BYTES)" IC_BLOCK="$(IC_BLOCK)" IC_WAYS="$(IC_WAYS)" \
 		DC_BYTES="$(DC_BYTES)" DC_BLOCK="$(DC_BLOCK)" DC_WAYS="$(DC_WAYS)" DC_WB="$(DC_WB)" \
+		BTB_IDX_BITS="$(BTB_IDX_BITS)" BTB_TAG_BITS="$(BTB_TAG_BITS)" \
+		GSHARE="$(GSHARE)" RAS_DEPTH="$(RAS_DEPTH)" \
 		./bench/run_bench.sh
 
 # Lint only — quick syntax/structure check, -Wall with a documented waiver file.
@@ -153,12 +193,12 @@ wave: sim assemble
 # Functional coverage: build with --coverage against a cache-enabled config
 # (so the D-cache FSM points are reachable), run the directed suite, merge
 # and annotate. Report: docs/coverage.md.
-COVDIR = obj_dir_cov
-coverage: assemble
+COVDIR = obj_dir_cov_bp$(BTB_IDX_BITS)_2_$(GSHARE)_$(RAS_DEPTH)
+coverage: config-check assemble
 	verilator --cc --exe --build --trace --assert --timing --coverage \
 	    -GIMEM_LATENCY=10 -GDMEM_LATENCY=10 \
 	    -GICACHE_BYTES=1024 -GICACHE_BLOCK_WORDS=4 -GICACHE_WAYS=4 \
-	    -GBTB_TAG_BITS=2 \
+	    -GBTB_IDX_BITS=$(BTB_IDX_BITS) -GBTB_TAG_BITS=2 -GGSHARE=$(GSHARE) -GRAS_DEPTH=$(RAS_DEPTH) \
 	    -GDCACHE_BYTES=4096 -GDCACHE_BLOCK_WORDS=4 -GDCACHE_WAYS=4 -GDCACHE_WRITE_BACK=1 \
 	    --Mdir $(COVDIR) --top-module $(TOP) $(CPU_SRCS) $(TB)
 	@rm -rf coverage && mkdir -p coverage
@@ -191,10 +231,10 @@ coverage: assemble
 # Spike co-simulation. Built separately because it needs RESET_PC=0x80000000
 # to match the memory map Spike forces programs to link at — see
 # compliance/link/spike-lockstep.ld.
-LOCKSTEP_DIR = obj_dir_lockstep
+LOCKSTEP_DIR = obj_dir_lockstep_bp$(BTB_IDX_BITS)_$(BTB_TAG_BITS)_$(GSHARE)_$(RAS_DEPTH)
 LOCKSTEP_TIMEOUT ?= 300
-lockstep-sim:
-	verilator $(VFLAGS) -GRESET_PC=0x80000000 --Mdir $(LOCKSTEP_DIR) \
+lockstep-sim: config-check
+	verilator $(VFLAGS) $(GPARAMS) -GRESET_PC=0x80000000 --Mdir $(LOCKSTEP_DIR) \
 	    --top-module $(TOP) $(CPU_SRCS) $(TB)
 
 lockstep: lockstep-sim
@@ -204,7 +244,8 @@ lockstep: lockstep-sim
 # golden model (tools/rv32i_model.py). make soak SEEDS=1000
 SEEDS ?= 100
 soak: sim
-	SIM="$(CURDIR)/$(SIM)" ./tools/soak.sh $(SEEDS)
+	SIM="$(CURDIR)/$(SIM)" BTB_IDX_BITS="$(BTB_IDX_BITS)" BTB_TAG_BITS="$(BTB_TAG_BITS)" \
+		GSHARE="$(GSHARE)" RAS_DEPTH="$(RAS_DEPTH)" ./tools/soak.sh $(SEEDS)
 
 # Pinned RV32I architecture-test signature suite.
 compliance: sim
@@ -224,4 +265,4 @@ synth-summary:
 	python3 syn/summarize_reports.py --report-dir "$(REPORT_DIR)"
 
 clean:
-	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov obj_dir_lockstep coverage tests/*.hex tests/*.vcd cpu.vcd
+	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov* obj_dir_lockstep* coverage tests/*.hex tests/*.vcd cpu.vcd
