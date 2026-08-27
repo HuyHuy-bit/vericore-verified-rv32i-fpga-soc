@@ -371,6 +371,9 @@ class CoverageTargetTest(unittest.TestCase):
         shutil.copytree(ROOT / "tests", self.repo / "tests")
         shutil.copytree(ROOT / "tools", self.repo / "tools")
         (self.repo / "docs").mkdir()
+        (self.repo / "verification/coverpoints").mkdir(parents=True)
+        (self.repo / "verification/coverpoints/false_predict.s").write_text("halt\n")
+        (self.repo / "verification/coverpoints/false_predict.ref").write_text("cycles=10\n")
         self.bin_dir = self.work / "bin"
         self.bin_dir.mkdir()
         self.merge_marker = self.work / "verilator-coverage-invoked"
@@ -400,6 +403,10 @@ import os
 from pathlib import Path
 import sys
 for arg in sys.argv[1:]:
+    if arg.endswith("c_false_predict.hex"):
+        marker = os.environ.get("FAKE_COVERAGE_ALIAS_MARKER")
+        if marker:
+            Path(marker).write_text("ran\\\\n")
     if arg.startswith("+MEMFILE=") and arg.endswith("t01_rtype.hex"):
         mode = os.environ.get("FAKE_COVERAGE_MODE", "sim-failure")
         if mode == "sim-failure":
@@ -420,7 +427,7 @@ import os
 import sys
 Path(os.environ["FAKE_COVERAGE_MERGE_MARKER"]).write_text("invoked\\n")
 if sys.argv[1] == "--write":
-    Path(sys.argv[2]).write_text("")
+    Path(sys.argv[2]).write_text("# SystemC::Coverage-3\\nC '\\x01t\\x02user\\x01h\\x02TOP.cpu.fake' 1\\n")
 elif sys.argv[1] == "--annotate":
     Path(sys.argv[2]).mkdir(parents=True, exist_ok=True)
 """)
@@ -451,6 +458,19 @@ elif sys.argv[1] == "--annotate":
                     "coverage artifact missing or empty: t01_rtype", combined,
                 )
                 self.assertFalse(self.merge_marker.exists(), combined)
+
+    def test_coverage_runs_deterministic_btb_alias_fixture(self):
+        marker = self.work / "alias-fixture-ran"
+        self.env.update({
+            "FAKE_COVERAGE_MODE": "success",
+            "FAKE_COVERAGE_ALIAS_MARKER": str(marker),
+        })
+        result = subprocess.run(
+            ["make", "coverage"], cwd=self.repo, env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(marker.exists(), result.stdout + result.stderr)
 
 
 class SoakTargetTest(unittest.TestCase):
@@ -633,6 +653,29 @@ class RandomGeneratorContractTest(unittest.TestCase):
                  if ".word 0x" in line]
         self.assertEqual(words[-1], "0000006f")
         self.assertNotEqual(words[-5:], self.TOHOST_TAIL)
+
+
+class AssemblerPaddingTest(unittest.TestCase):
+    def test_fill_emits_requested_nops_and_preserves_label_offsets(self):
+        with tempfile.TemporaryDirectory(prefix="rv32i-asm-fill-") as temp:
+            work = Path(temp)
+            source = work / "fill.s"
+            output = work / "fill.hex"
+            source.write_text(
+                "jal x1, target\n"
+                ".fill 3\n"
+                "target: addi x2, x0, 7\n"
+            )
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools/asm.py"), str(source), str(output)],
+                cwd=ROOT, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                output.read_text().splitlines(),
+                ["010000ef", "00000013", "00000013", "00000013", "00700113"],
+            )
 
 
 class Elf2HexTest(unittest.TestCase):
@@ -885,6 +928,35 @@ exit 0
         self.assertIn("LATENCY must be a positive integer", result.stdout + result.stderr)
         self.assertFalse(self.work_log.exists(), result.stdout + result.stderr)
 
+    def test_explicit_simulator_is_used(self):
+        selected_marker = self.work / "selected-simulator-ran"
+        selected = self.work / "selected-sim"
+        self.write_executable(selected, """#!/usr/bin/env bash
+: > "$FAKE_SELECTED_SIM_MARKER"
+exec "$FAKE_FALLBACK_SIM" "$@"
+""")
+        result = self.run_bench(
+            SIM=str(selected),
+            FAKE_SELECTED_SIM_MARKER=str(selected_marker),
+            FAKE_FALLBACK_SIM=str(self.repo / "obj_dir/Vcpu"),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(selected_marker.exists(), result.stdout + result.stderr)
+
+    def test_make_bench_selects_the_configuration_build(self):
+        result = subprocess.run(
+            [
+                "make", "-Bn", "bench", "IC_BYTES=1024", "IC_WAYS=4",
+                "DC_BYTES=4096", "DC_WAYS=4", "DC_WB=1",
+                "IMEM_LAT=10", "DMEM_LAT=10",
+            ],
+            cwd=ROOT, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10,
+        )
+        expected = ROOT / "obj_dir_ic1024_4_4_dc4096_4_4_1_L10_10/Vcpu"
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f'SIM="{expected}"', result.stdout)
+
 
 class ComplianceRunnerTest(unittest.TestCase):
     """Exercise a copied runner in an isolated, one-case mini-repository."""
@@ -949,6 +1021,10 @@ class ComplianceRunnerTest(unittest.TestCase):
     def write_tools(self):
         self.write(self.bin_dir / "riscv64-unknown-elf-gcc", """#!/usr/bin/env bash
 set -eu
+if [ "${FAKE_GCC_RC:-0}" -ne 0 ]; then
+    echo 'fake compiler diagnostic' >&2
+    exit "$FAKE_GCC_RC"
+fi
 while [ "$#" -gt 0 ]; do
     if [ "$1" = -o ]; then touch "$2"; exit 0; fi
     shift
@@ -1083,6 +1159,12 @@ fi
         self.env["PATH"] = str(no_objcopy)
         self.assert_runner_failure(
             "error: required tool not found: riscv64-unknown-elf-objcopy")
+
+    def test_compliance_compile_failure_prints_diagnostic(self):
+        self.env["FAKE_GCC_RC"] = "6"
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("fake compiler diagnostic", result.stdout + result.stderr)
 
     def test_compliance_rejects_simulator_crash_with_stale_signature(self):
         self.env["FAKE_SIM_MODE"] = "crash"
@@ -1437,7 +1519,10 @@ fi
 """)
         self.write_tool("riscv64-unknown-elf-gcc", """
 [ -z "${FAKE_CHILD_MARKER:-}" ] || : > "$FAKE_CHILD_MARKER"
-[ "${FAKE_GCC_RC:-0}" -eq 0 ] || exit "$FAKE_GCC_RC"
+if [ "${FAKE_GCC_RC:-0}" -ne 0 ]; then
+    echo 'fake compiler diagnostic' >&2
+    exit "$FAKE_GCC_RC"
+fi
 touch "${@: -1}"
 """)
         self.write_tool("python3", """
@@ -1511,6 +1596,7 @@ exec "$REAL_PYTHON" "$@"
         result = self.assert_wrapper_failure("FAIL  case (compile error")
         self.assertIn("0/1 programs match", result.stdout + result.stderr)
         self.assertIn("case (compile)", result.stdout + result.stderr)
+        self.assertIn("fake compiler diagnostic", result.stdout + result.stderr)
 
     def test_architecture_conversion_failure_is_counted(self):
         self.add_source()

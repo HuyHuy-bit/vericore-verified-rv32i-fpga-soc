@@ -42,7 +42,8 @@ def main():
     print("**Evidence status: current.**")
     print()
     print(f"**{hit}/{total} cover points hit ({pct:.1f}%)**, from the directed "
-          "test suite run against a cache-enabled build (`make coverage`).")
+          "suite and deterministic BTB-alias fixture run against a cache-enabled "
+          "build (`make coverage`).")
     print()
     print("| Cover point | Hits |")
     print("|---|---|")
@@ -56,28 +57,20 @@ def main():
     # end with each one either closed or justified.
     notes = {
         "c_false_predict":
-            "requires a BTB alias: a non-control-flow instruction whose PC "
-            "collides with a previously-taken branch's tag. Reachable only by "
-            "constructing a specific PC collision, which random stimulus finds "
-            "more naturally than a directed test.",
+            "the deterministic BTB-alias fixture no longer reaches the stale "
+            "taken prediction.",
         "c_load_use_and_mispredict":
-            "a load-use stall coincident with a mispredict in the same cycle. "
-            "Needs a load feeding a branch's operand at exactly distance 1 with "
-            "the branch mispredicting - a narrow window best reached by random "
-            "stimulus.",
+            "the load-dependent branch in t25 no longer mispredicts after the "
+            "pipeline accepts the hazard bubble.",
         "c_pred_tt_mismatch":
             "predicted-taken and actually-taken but to a *different* target: "
             "needs an indirect jump (JALR) reached from two call sites so the "
-            "BTB holds a stale target. The plan's Phase 10a return-address "
-            "stack is the feature that makes this common.",
+            "BTB holds a stale target. Return-address prediction makes this "
+            "case more common.",
         "c_miss_load":
-            "a load that misses with no dirty victim. t19 dirties every way "
-            "before missing, so its misses all take the write-back path; an "
-            "unmodified working set larger than the cache would hit this.",
+            "t19 no longer reloads the clean line evicted by its FIFO sequence.",
         "c_trans_flush_to_idle":
-            "the debug flush walk completing with no dirty line left to write "
-            "back. The testbench flush always follows a dirty run, so it exits "
-            "through FLUSH->WB rather than FLUSH->IDLE.",
+            "the harness no longer samples the cycle after cache-drain completion.",
     }
     unhit = [n for n, c in points.items() if c == 0]
     if unhit:

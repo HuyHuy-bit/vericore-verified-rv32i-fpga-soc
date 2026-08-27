@@ -18,9 +18,9 @@ EVIDENCE_FACT ASSERTIONS_TOTAL=27
 EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
 EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
-EVIDENCE_FACT TRACKED_COVERAGE_HIT=34
-EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=38
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
 EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
@@ -43,7 +43,7 @@ central reference metadata by `make evidence-check`.
 | Architecture signatures | `make compliance`, pinned 38 cases | Pending final recorded rerun |
 | Spike architecture lockstep | `make lockstep`, pinned 38 cases | Pending final recorded rerun |
 | Spike random lockstep | `make soak-lockstep SEEDS=200` | Pending final recorded rerun |
-| Functional coverage | `make coverage` | Tracked 34/38 report is historical; current 44-point rerun pending |
+| Functional coverage | `make coverage` | 44/44 source cover points hit (100%) |
 | Benchmarks | Four specified memory/cache configurations | Pending final recorded rerun |
 | FPGA routes | `make synth-matrix` and `make synth-summary`, four 512-word configurations | Pending final recorded rerun |
 

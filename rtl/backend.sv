@@ -783,8 +783,14 @@ ex_mem_t ex_mem_d, ex_mem_q;
         cov_en && mret_take);
 
     // hazard interactions
+    logic [1:0] cov_load_use_progress;
+    always_ff @(posedge clk) begin
+        if (rst) cov_load_use_progress <= '0;
+        else if (!pipe_stall)
+            cov_load_use_progress <= {cov_load_use_progress[0], load_use_stall};
+    end
     c_load_use_and_mispredict: cover property (@(posedge clk) disable iff (rst)
-        cov_en && load_use_stall && ex_flush);
+        cov_en && !pipe_stall && cov_load_use_progress[1] && ex_flush);
     // trap_redirect only ever fires when !pipe_stall (see the commit-point
     // comment above), so the interesting cross is a trap-eligible instruction
     // parked in MEM *during* a stall, one cycle before it can commit.

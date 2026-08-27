@@ -12,9 +12,9 @@ EVIDENCE_FACT ASSERTIONS_TOTAL=27
 EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
 EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
-EVIDENCE_FACT TRACKED_COVERAGE_HIT=34
-EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=38
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
 EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
@@ -31,7 +31,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 | Compliance suite | 38/38 `rv32i_m/I` | ISA conformance the author wouldn't think to target |
 | Spike lockstep | 38 programs, instruction-by-instruction | Right answer reached by the *wrong path* |
 | Assertions | 25 concurrent properties + 2 immediate checks | Invariant violations, in any test, immediately |
-| Functional coverage | 44 source points; historical report 34/38 | Scenarios nothing exercises |
+| Functional coverage | 44/44 source points hit (100%) | Instrumented scenarios |
 | Constrained-random | 1000 seeds vs. a Python model; 200 vs. Spike | Blind spots of whoever wrote the directed tests |
 
 ## Directed tests (`tests/`, run via `make all`)
@@ -76,9 +76,9 @@ The interrupt properties are the sharpest: an interrupt resumes at `pc+4` while 
 
 ## Functional coverage (`make coverage`, `docs/coverage.md`)
 
-Verilator doesn't support covergroups; `cover property` is the supported equivalent. The RTL currently contains 44 points across forwarding crosses, predictor outcomes, control-flow types, trap causes, and the D-cache FSM. The tracked report is a historical **34/38 (89.5%)** run from before the forwarding-cross expansion; it remains labeled historical until the final `make coverage` rerun.
+Verilator doesn't support covergroups; `cover property` is the supported equivalent. The RTL contains 44 points across forwarding crosses, predictor outcomes, control-flow types, trap causes, and the D-cache FSM. The current report hits **44/44 (100%)**.
 
-The four holes in that historical report are annotated in `docs/coverage.md` with why they remained open. The fresh report will reconcile those hits against all 44 current source points.
+The coverage target runs the 25 directed programs plus one deterministic BTB-alias fixture.
 
 ## Constrained-random, two flows
 

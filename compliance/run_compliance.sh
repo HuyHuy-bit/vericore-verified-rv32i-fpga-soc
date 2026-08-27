@@ -134,6 +134,7 @@ for src in "${SOURCES[@]}"; do
         -I "$ARCH_TEST/riscv-test-env/p" \
         -DXLEN=32 "$src" -o "$elf" 2> "$case_dir/compile.log"; then
         echo "FAIL  $name (compile error - see $case_dir/compile.log)"
+        cat "$case_dir/compile.log"
         FAIL=$((FAIL + 1)); FAILED_TESTS+=("$name (compile)")
         continue
     fi

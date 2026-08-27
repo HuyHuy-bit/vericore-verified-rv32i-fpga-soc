@@ -38,6 +38,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc-riscv64-unknown-elf device-tree-compiler \
                                   libboost-dev libboost-regex-dev libboost-system-dev
+          riscv64-unknown-elf-gcc --version
+          riscv64-unknown-elf-as --version
 
       # Ubuntu's apt Verilator (4.038) predates --timing, which the
       # assertions build depends on; conda-forge tracks current releases.

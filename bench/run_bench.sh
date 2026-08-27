@@ -63,7 +63,9 @@ trap cleanup EXIT
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-bench.XXXXXX") \
     || die "could not create benchmark work directory"
 
-if [ "$LATENCY" -le 1 ] && [ "$IC_BYTES" -eq 0 ] && [ "$DC_BYTES" -eq 0 ]; then
+if [ -n "${SIM:-}" ]; then
+    [ -x "$SIM" ] || die "$SIM not built - run 'make sim' first"
+elif [ "$LATENCY" -le 1 ] && [ "$IC_BYTES" -eq 0 ] && [ "$DC_BYTES" -eq 0 ]; then
     SIM="$ROOT/obj_dir/Vcpu"          # the plain build the Makefile already makes
     if [ ! -x "$SIM" ]; then
         echo "error: $SIM not built - run 'make sim' first" >&2

@@ -290,6 +290,7 @@ int main(int argc, char** argv) {
     }
     if (!drained && verify) fail("cache drain deadline exhausted");
     top->dbg_flush = 0;
+    if (drained) tick();
     if (tfp) { tfp->close(); delete tfp; }
 
     if (!rvfifile.empty()) {

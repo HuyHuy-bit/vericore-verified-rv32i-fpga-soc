@@ -22,6 +22,9 @@
 
     # This is the only live load-use dependency and must insert one bubble.
     lw    x10, 12(x0)
+    bne   x10, x0, dependent
+    addi  x11, x0, 0
+dependent:
     addi  x11, x10, 1
     csrrs x12, mscratch, x0
 

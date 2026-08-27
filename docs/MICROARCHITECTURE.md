@@ -14,9 +14,9 @@ EVIDENCE_FACT ASSERTIONS_TOTAL=27
 EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
 EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
-EVIDENCE_FACT TRACKED_COVERAGE_HIT=34
-EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=38
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
 EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
@@ -218,7 +218,7 @@ See [`docs/VERIFICATION_PLAN.md`](VERIFICATION_PLAN.md) for the full breakdown. 
 - 25 directed tests run across the 6-configuration cache/latency CI matrix.
 - 38/38 pinned architecture signatures and 38/38 complete Spike traces run in their own workflows, not across the directed matrix.
 - 27 assertions: 25 concurrent SVA properties plus 2 immediate hazard checks.
-- 44 source cover points; the tracked 34/38 report is historical until `make coverage` regenerates it from the current source set.
+- 44/44 source cover points hit (100%) in the current `make coverage` report.
 - Constrained-random regression (`make soak`) against a small Python golden model, 1000/1000 seeds clean on both cacheless and cache-enabled builds — scoped to the ALU/load-store subset, since the model doesn't interpret control flow or CSRs (the directed suite, compliance suite, and lockstep cover those instead).
 
 ## Known limitations and future work

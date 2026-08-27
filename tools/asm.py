@@ -39,9 +39,10 @@ def assemble(src):
     # Pseudo-instructions that expand to more than one word. The label pass
     # has to know their true size or every label after one of them shifts -
     # which is exactly the bug that hardcoded handler offsets used to hide.
-    SIZES={'la':2,'tohost':4}
     def op_words(line):
-        return SIZES.get(re.split(r'[\s,()]+',line)[0].lower(), 1)
+        p=[x for x in re.split(r'[\s,()]+',line) if x]
+        if p[0].lower() in ('fill','.fill'): return int(p[1],0)
+        return {'la':2,'tohost':4}.get(p[0].lower(), 1)
 
     labels={}; instrs=[]; addr=0
     for line in src.splitlines():
@@ -126,6 +127,8 @@ def assemble(src):
         elif op in ('fence.i','fencei'): words.append(0x0000100F)
         elif op in ('word','.word'):
             words.append(int(p[1],0) & 0xFFFFFFFF)   # raw 32-bit word
+        elif op in ('fill','.fill'):
+            words.extend([0x00000013] * int(p[1],0))
         elif op in ('csrrw','csrrs','csrrc'):
             f3={'csrrw':1,'csrrs':2,'csrrc':3}[op]
             words.append((CSR_NUM(p[2])<<20)|(r(p[3])<<15)|(f3<<12)|(r(p[1])<<7)|0x73)

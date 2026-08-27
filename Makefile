@@ -100,6 +100,7 @@ test: sim assemble memtiming
 # the fixtures invoke the real binary.
 harness-test: sim
 	python3 tools/test_harness.py
+	python3 -m unittest -v tools.test_arch_compat
 	@$(MAKE) --no-print-directory sim IC_BYTES=0 DC_BYTES=4096 DC_WAYS=4 DC_WB=0 IMEM_LAT=1 DMEM_LAT=10
 	SIM="$(CURDIR)/obj_dir_ic0_4_1_dc4096_4_4_0_L1_10/Vcpu" \
 		python3 -m unittest -v tools.test_harness.HarnessTest.test_tohost_bypasses_dcache
@@ -112,7 +113,10 @@ check: unit harness-test lint evidence-check
 
 # Run the C benchmark kernels and print the CPI table.
 bench: sim
-	@./bench/run_bench.sh
+	@SIM="$(CURDIR)/$(SIM)" LATENCY="$(IMEM_LAT)" \
+		IC_BYTES="$(IC_BYTES)" IC_BLOCK="$(IC_BLOCK)" IC_WAYS="$(IC_WAYS)" \
+		DC_BYTES="$(DC_BYTES)" DC_BLOCK="$(DC_BLOCK)" DC_WAYS="$(DC_WAYS)" DC_WB="$(DC_WB)" \
+		./bench/run_bench.sh
 
 # Lint only — quick syntax/structure check, -Wall with a documented waiver file.
 lint:
@@ -134,9 +138,11 @@ coverage: assemble
 	verilator --cc --exe --build --trace --assert --timing --coverage \
 	    -GIMEM_LATENCY=10 -GDMEM_LATENCY=10 \
 	    -GICACHE_BYTES=1024 -GICACHE_BLOCK_WORDS=4 -GICACHE_WAYS=4 \
+	    -GBTB_TAG_BITS=2 \
 	    -GDCACHE_BYTES=4096 -GDCACHE_BLOCK_WORDS=4 -GDCACHE_WAYS=4 -GDCACHE_WRITE_BACK=1 \
 	    --Mdir $(COVDIR) --top-module $(TOP) $(CPU_SRCS) $(TB)
 	@rm -rf coverage && mkdir -p coverage
+	@$(ASM) verification/coverpoints/false_predict.s coverage/c_false_predict.hex > /dev/null
 	@FAIL=0; \
 	for t in $(TESTS); do \
 	    CYCS=$$(grep '^cycles=' tests/$$t.ref 2>/dev/null | cut -d= -f2); CYCS=$${CYCS:-25}; \
@@ -149,6 +155,14 @@ coverage: assemble
 	    fi; \
 	done; \
 	[ $$FAIL -eq 0 ]
+	@COVFILE=coverage/c_false_predict.dat; \
+	if ! ./$(COVDIR)/V$(TOP) +MEMFILE=coverage/c_false_predict.hex \
+	    +REFFILE=verification/coverpoints/false_predict.ref +STOP=tohost +CYCLES=400 \
+	    +VCD= +COVERAGE="$$COVFILE" > /dev/null; then \
+	    echo "coverage simulation failed: c_false_predict" >&2; exit 1; \
+	elif [ ! -s "$$COVFILE" ]; then \
+	    echo "coverage artifact missing or empty: c_false_predict" >&2; exit 1; \
+	fi
 	verilator_coverage --write coverage/merged.dat coverage/*.dat
 	verilator_coverage --annotate coverage/annotated coverage/merged.dat
 	python3 tools/coverage_report.py coverage/merged.dat > docs/coverage.md
