@@ -241,7 +241,8 @@ lockstep-sim: config-check
 	    --top-module $(TOP) $(CPU_SRCS) $(TB)
 
 lockstep: lockstep-sim
-	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/run_lockstep.sh
+	SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)" LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) \
+		./tools/run_lockstep.sh
 
 # Constrained-random regression: SEEDS random programs against the Python
 # golden model (tools/rv32i_model.py). make soak SEEDS=1000
@@ -257,7 +258,8 @@ compliance: sim
 # Random programs compared against Spike instead of the Python model, which
 # is what lets them contain branches and jumps (see tools/soak_lockstep.sh).
 soak-lockstep: lockstep-sim
-	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/soak_lockstep.sh $(SEEDS)
+	SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)" LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) \
+		./tools/soak_lockstep.sh $(SEEDS)
 
 REPORT_DIR ?= syn/reports
 RESULT_RUN_DIR ?= .portfolio-runs/current

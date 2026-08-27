@@ -91,6 +91,13 @@ class MakeConfigurationTest(unittest.TestCase):
         ):
             self.assertIn(f"$(MAKE) --no-print-directory all {arguments}", makefile)
 
+    def test_lockstep_targets_use_the_configured_build_identity(self):
+        source = (ROOT / "Makefile").read_text(encoding="utf-8")
+        assignment = 'SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)"'
+        self.assertEqual(source.count(assignment), 2)
+        self.assertIn("lockstep: lockstep-sim", source)
+        self.assertIn("soak-lockstep: lockstep-sim", source)
+
 
 if __name__ == "__main__":
     unittest.main()
