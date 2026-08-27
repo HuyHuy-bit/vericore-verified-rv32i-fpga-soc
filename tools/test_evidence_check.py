@@ -34,10 +34,14 @@ class EvidenceContractTest(unittest.TestCase):
         "rtl/**",
         "cpu_tb.cpp",
         "Makefile",
+        "bench/**",
         "compliance/**",
+        "containers/**",
+        ".devcontainer/**",
         "tools/**",
         "unit/**",
         "tests/**",
+        "results/**",
     )
     MATRIX = (
         ("baseline", ""),
@@ -403,6 +407,42 @@ class EvidenceContractTest(unittest.TestCase):
         result = self.run_checker()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("reference and CI contracts: OK", result.stdout)
+
+    def use_container_workflows(self) -> None:
+        for name in ("rtl-tests.yml", "compliance.yml", "lockstep.yml"):
+            self.write_workflow(
+                name,
+                (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"),
+            )
+
+    def test_container_workflow_contract_passes(self) -> None:
+        self.use_container_workflows()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_container_workflow_rejects_moving_action_tag(self) -> None:
+        self.use_container_workflows()
+        path = self.repo / ".github/workflows/rtl-tests.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955",
+                "actions/checkout@v4",
+            ),
+            encoding="utf-8",
+        )
+        self.assert_contract_failure("approved immutable commits")
+
+    def test_container_workflow_rejects_missing_predictor_profile(self) -> None:
+        self.use_container_workflows()
+        path = self.repo / ".github/workflows/rtl-tests.yml"
+        source = path.read_text(encoding="utf-8")
+        source = source.replace(
+            "      - name: Run three predictor configurations\n"
+            "        run: python3 tools/verification.py container --profile directed-predictor\n",
+            "",
+        )
+        path.write_text(source, encoding="utf-8")
+        self.assert_contract_failure("commands are not canonical")
 
     def test_real_repository_metadata_matches_test_only_oracle(self) -> None:
         parsed = {}

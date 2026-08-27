@@ -7,137 +7,49 @@ on:
       - 'rtl/**'
       - 'cpu_tb.cpp'
       - 'Makefile'
+      - 'bench/**'
       - 'compliance/**'
+      - 'containers/**'
+      - '.devcontainer/**'
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'results/**'
       - '.github/workflows/lockstep.yml'
   pull_request:
     paths:
       - 'rtl/**'
       - 'cpu_tb.cpp'
       - 'Makefile'
+      - 'bench/**'
       - 'compliance/**'
+      - 'containers/**'
+      - '.devcontainer/**'
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'results/**'
       - '.github/workflows/lockstep.yml'
+
+permissions:
+  contents: read
 
 jobs:
   lockstep:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc-riscv64-unknown-elf device-tree-compiler \
-                                  libboost-dev libboost-regex-dev libboost-system-dev
-          riscv64-unknown-elf-gcc --version
-          riscv64-unknown-elf-as --version
-
-      # Ubuntu's apt Verilator (4.038) predates --timing, which the
-      # assertions build depends on; conda-forge tracks current releases.
-      - name: Install Verilator (conda-forge)
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Restore pinned reference cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
-          miniforge-version: latest
-          channels: conda-forge
-          channel-priority: strict
+          path: .verify-cache
+          key: verify-references-${{ hashFiles('tools/reference_versions.env', 'tools/tool_versions.env') }}
 
-      - name: Install verilator package
-        run: mamba install -y -c conda-forge verilator
+      - name: Run complete architecture traces against Spike
+        run: python3 tools/verification.py container --profile lockstep
 
-      - name: Load reference versions
-        id: refs
-        run: |
-          set -eu
-          source tools/reference_versions.env
-          echo "arch_test_sha=$ARCH_TEST_SHA" >> "$GITHUB_OUTPUT"
-          echo "arch_test_expected=$ARCH_TEST_EXPECTED" >> "$GITHUB_OUTPUT"
-          echo "spike_sha=$SPIKE_SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Cache riscv-arch-test
-        id: arch-test-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/riscv-arch-test
-          key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}
-
-      - name: Fetch pinned riscv-arch-test checkout
-        env:
-          ARCH_TEST_SHA: ${{ steps.refs.outputs.arch_test_sha }}
-        run: |
-          set -eu
-          if [ ! -d "$HOME/riscv-arch-test/.git" ]; then
-            git init -q "$HOME/riscv-arch-test"
-          fi
-          git -C "$HOME/riscv-arch-test" remote remove origin 2>/dev/null || true
-          git -C "$HOME/riscv-arch-test" remote add origin \
-            https://github.com/riscv-non-isa/riscv-arch-test.git
-          git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"
-          git -C "$HOME/riscv-arch-test" checkout -q --detach "$ARCH_TEST_SHA"
-          git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"
-          test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
-          test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
-          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=all)"
-
-      # Cache the Git checkout and in-tree build together. The lockstep wrappers
-      # can then verify the executable's containing repository identity.
-      - name: Cache Spike source and build
-        id: spike-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/riscv-isa-sim
-          key: spike-${{ steps.refs.outputs.spike_sha }}
-
-      - name: Fetch and build pinned Spike
-        env:
-          SPIKE_SHA: ${{ steps.refs.outputs.spike_sha }}
-        run: |
-          set -eu
-          if [ ! -d "$HOME/riscv-isa-sim/.git" ]; then
-            git init -q "$HOME/riscv-isa-sim"
-          fi
-          git -C "$HOME/riscv-isa-sim" remote remove origin 2>/dev/null || true
-          git -C "$HOME/riscv-isa-sim" remote add origin \
-            https://github.com/riscv-software-src/riscv-isa-sim.git
-          git -C "$HOME/riscv-isa-sim" fetch -q --depth 1 origin "$SPIKE_SHA"
-          git -C "$HOME/riscv-isa-sim" checkout -q --detach "$SPIKE_SHA"
-          git -C "$HOME/riscv-isa-sim" reset -q --hard "$SPIKE_SHA"
-          test "$(git -C "$HOME/riscv-isa-sim" rev-parse HEAD)" = "$SPIKE_SHA"
-          test -z "$(git -C "$HOME/riscv-isa-sim" symbolic-ref -q HEAD || true)"
-          test -z "$(git -C "$HOME/riscv-isa-sim" status --short --untracked-files=all)"
-          if [ ! -x "$HOME/riscv-isa-sim/build/spike" ] || [ ! -f "$HOME/riscv-isa-sim/build/.source-sha" ] || [ "$(cat "$HOME/riscv-isa-sim/build/.source-sha" 2>/dev/null || true)" != "$SPIKE_SHA" ]; then
-            rm -rf "$HOME/riscv-isa-sim/build"
-            mkdir -p "$HOME/riscv-isa-sim/build"
-            cd "$HOME/riscv-isa-sim/build"
-            ../configure
-            make -j"$(nproc)"
-            printf '%s\n' "$SPIKE_SHA" > .source-sha
-          fi
-          test -x "$HOME/riscv-isa-sim/build/spike"
-          test "$(cat "$HOME/riscv-isa-sim/build/.source-sha")" = "$SPIKE_SHA"
-
-      - name: Run complete architecture-test traces against Spike
-        env:
-          # $HOME, not "~": a tilde in a YAML env value is a literal string,
-          # and neither the shell nor Python expands it on the way through.
-          ARCH_TEST: /home/runner/riscv-arch-test
-          ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
-          SPIKE: /home/runner/riscv-isa-sim/build/spike
-        run: make lockstep
-
-      # The compliance programs above are fixed; these are generated fresh and
-      # contain branches and jumps, which the Python-model soak cannot produce.
-      # ~20 s for 200 seeds, so there's no reason to run fewer in CI than
-      # locally. Reuses the obj_dir_lockstep build the previous step made.
-      - name: Random programs against Spike (with control flow)
-        env:
-          SPIKE: /home/runner/riscv-isa-sim/build/spike
-        run: make soak-lockstep SEEDS=200
+      - name: Run random programs against Spike
+        run: python3 tools/verification.py container --profile random-spike

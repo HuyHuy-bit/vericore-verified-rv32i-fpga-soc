@@ -7,92 +7,46 @@ on:
       - 'rtl/**'
       - 'cpu_tb.cpp'
       - 'Makefile'
+      - 'bench/**'
       - 'compliance/**'
+      - 'containers/**'
+      - '.devcontainer/**'
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'results/**'
       - '.github/workflows/compliance.yml'
   pull_request:
     paths:
       - 'rtl/**'
       - 'cpu_tb.cpp'
       - 'Makefile'
+      - 'bench/**'
       - 'compliance/**'
+      - 'containers/**'
+      - '.devcontainer/**'
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'results/**'
       - '.github/workflows/compliance.yml'
+
+permissions:
+  contents: read
 
 jobs:
   compliance:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
-      - name: Check out rv32i-pipeline
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
-      - name: Install RISC-V toolchain
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc-riscv64-unknown-elf
-          riscv64-unknown-elf-gcc --version
-          riscv64-unknown-elf-as --version
-
-      # Ubuntu's apt package is Verilator 4.038 (2021) - it doesn't have
-      # --timing, which the assertions/coverage build (Makefile VFLAGS)
-      # depends on. conda-forge tracks current releases.
-      - name: Install Verilator (conda-forge)
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Restore pinned reference cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
-          miniforge-version: latest
-          channels: conda-forge
-          channel-priority: strict
+          path: .verify-cache
+          key: verify-references-${{ hashFiles('tools/reference_versions.env', 'tools/tool_versions.env') }}
 
-      - name: Install verilator package
-        run: mamba install -y -c conda-forge verilator
-
-      - name: Load reference versions
-        id: refs
-        run: |
-          set -eu
-          source tools/reference_versions.env
-          echo "arch_test_sha=$ARCH_TEST_SHA" >> "$GITHUB_OUTPUT"
-          echo "arch_test_expected=$ARCH_TEST_EXPECTED" >> "$GITHUB_OUTPUT"
-          echo "spike_sha=$SPIKE_SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Cache riscv-arch-test
-        id: arch-test-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/riscv-arch-test
-          key: riscv-arch-test-${{ steps.refs.outputs.arch_test_sha }}
-
-      - name: Fetch pinned riscv-arch-test checkout
-        env:
-          ARCH_TEST_SHA: ${{ steps.refs.outputs.arch_test_sha }}
-        run: |
-          set -eu
-          if [ ! -d "$HOME/riscv-arch-test/.git" ]; then
-            git init -q "$HOME/riscv-arch-test"
-          fi
-          git -C "$HOME/riscv-arch-test" remote remove origin 2>/dev/null || true
-          git -C "$HOME/riscv-arch-test" remote add origin \
-            https://github.com/riscv-non-isa/riscv-arch-test.git
-          git -C "$HOME/riscv-arch-test" fetch -q --depth 1 origin "$ARCH_TEST_SHA"
-          git -C "$HOME/riscv-arch-test" checkout -q --detach "$ARCH_TEST_SHA"
-          git -C "$HOME/riscv-arch-test" reset -q --hard "$ARCH_TEST_SHA"
-          test "$(git -C "$HOME/riscv-arch-test" rev-parse HEAD)" = "$ARCH_TEST_SHA"
-          test -z "$(git -C "$HOME/riscv-arch-test" symbolic-ref -q HEAD || true)"
-          test -z "$(git -C "$HOME/riscv-arch-test" status --short --untracked-files=all)"
-
-      - name: Build simulator
-        run: make clean && make all
-
-      - name: Run compliance suite
-        env:
-          # $HOME, not "~": a tilde in a YAML env value is a literal string.
-          ARCH_TEST: /home/runner/riscv-arch-test
-          ARCH_TEST_EXPECTED: ${{ steps.refs.outputs.arch_test_expected }}
-        run: make compliance
+      - name: Run architecture signatures in the pinned environment
+        run: python3 tools/verification.py container --profile compliance

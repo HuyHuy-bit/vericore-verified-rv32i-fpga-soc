@@ -7,10 +7,14 @@ on:
       - 'rtl/**'
       - 'cpu_tb.cpp'
       - 'Makefile'
+      - 'bench/**'
       - 'compliance/**'
+      - 'containers/**'
+      - '.devcontainer/**'
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'results/**'
       - 'README.md'
       - 'docs/**'
       - '.github/workflows/rtl-tests.yml'
@@ -19,118 +23,34 @@ on:
       - 'rtl/**'
       - 'cpu_tb.cpp'
       - 'Makefile'
+      - 'bench/**'
       - 'compliance/**'
+      - 'containers/**'
+      - '.devcontainer/**'
       - 'tools/**'
       - 'unit/**'
       - 'tests/**'
+      - 'results/**'
       - 'README.md'
       - 'docs/**'
       - '.github/workflows/rtl-tests.yml'
 
+permissions:
+  contents: read
+
 jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
+  verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
-      # Ubuntu's apt package is Verilator 4.038 (2021) - it doesn't have
-      # --timing, which the assertions/coverage build (Makefile VFLAGS)
-      # depends on. conda-forge tracks current releases.
-      - name: Install Verilator (conda-forge)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          channels: conda-forge
-          channel-priority: strict
+      - name: Run fast correctness in the pinned environment
+        run: python3 tools/verification.py container --profile fast
 
-      - name: Install verilator package
-        run: mamba install -y -c conda-forge verilator
+      - name: Run six memory configurations
+        run: python3 tools/verification.py container --profile directed-memory
 
-      - name: Verilator version
-        run: verilator --version
-
-      - name: Fast correctness checks
-        run: make check
-
-  # The directed suite must pass identically across cache configurations —
-  # that invariance is itself the test. Without this matrix, the D-cache and
-  # I-cache never execute in CI at all (the default build is cacheless).
-  test-matrix:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: baseline
-            args: ""
-          - name: slow-mem
-            args: "IMEM_LAT=10 DMEM_LAT=10"
-          - name: icache-only
-            args: "IC_BYTES=1024 IC_WAYS=4 IMEM_LAT=10 DMEM_LAT=10"
-          - name: wt
-            args: "IC_BYTES=1024 IC_WAYS=4 DC_BYTES=4096 DC_WAYS=4 DC_WB=0 IMEM_LAT=10 DMEM_LAT=10"
-          - name: wb
-            args: "IC_BYTES=1024 IC_WAYS=4 DC_BYTES=4096 DC_WAYS=4 DC_WB=1 IMEM_LAT=10 DMEM_LAT=10"
-          - name: assoc
-            args: "IC_BYTES=1024 IC_BLOCK=4 IC_WAYS=2 DC_BYTES=4096 DC_BLOCK=4 DC_WAYS=2 DC_WB=1 IMEM_LAT=10 DMEM_LAT=10"
-    steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
-
-      - name: Install Verilator (conda-forge)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          channels: conda-forge
-          channel-priority: strict
-
-      - name: Install verilator package
-        run: mamba install -y -c conda-forge verilator
-
-      - name: Run full test suite (${{ matrix.name }})
-        run: make all ${{ matrix.args }}
-
-  predictor-matrix:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: gshare
-            args: "GSHARE=1"
-            metric: "make focused-test TEST=t21_gshare_correlated FOCUSED_REF=tests/predictor/t21_gshare.ref GSHARE=1"
-          - name: no-ras
-            args: "RAS_DEPTH=0"
-            metric: "make focused-test TEST=t20_ras_multi_caller FOCUSED_REF=tests/predictor/t20_no_ras.ref RAS_DEPTH=0"
-          - name: small-btb
-            args: "BTB_IDX_BITS=4 BTB_TAG_BITS=6"
-            metric: "make config-check BTB_IDX_BITS=4 BTB_TAG_BITS=6"
-    steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
-
-      - name: Install Verilator (conda-forge)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          channels: conda-forge
-          channel-priority: strict
-
-      - name: Install verilator package
-        run: mamba install -y -c conda-forge verilator
-
-      - name: Run predictor suite (${{ matrix.name }})
-        run: make all ${{ matrix.args }}
-
-      - name: Check predictor metrics (${{ matrix.name }})
-        run: ${{ matrix.metric }}
+      - name: Run three predictor configurations
+        run: python3 tools/verification.py container --profile directed-predictor

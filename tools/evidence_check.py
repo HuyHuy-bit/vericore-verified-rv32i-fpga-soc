@@ -48,12 +48,18 @@ REQUIRED_PATHS = (
     "rtl/**",
     "cpu_tb.cpp",
     "Makefile",
+    "bench/**",
     "compliance/**",
+    "containers/**",
+    ".devcontainer/**",
     "tools/**",
     "unit/**",
     "tests/**",
+    "results/**",
 )
 EVIDENCE_PATHS = ("README.md", "docs/**")
+CHECKOUT_ACTION = "actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955"
+CACHE_ACTION = "actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"
 DIRECTED_MATRIX = (
     ("baseline", ""),
     ("slow-mem", "IMEM_LAT=10 DMEM_LAT=10"),
@@ -848,6 +854,79 @@ def require_gate_env(
             raise ContractError(f"{path.name}: {description} must bind {key} to {value}")
 
 
+def check_container_job(
+    path: Path,
+    jobs: dict[str, WorkflowJob],
+    name: str,
+    commands: tuple[str, ...],
+    cache: bool,
+) -> None:
+    job = required_job(path, jobs, name)
+    if set(job.values) != {"runs-on", "timeout-minutes", "steps"}:
+        raise ContractError(f"{path.name}: {name} job has unsupported properties")
+    if job.values["runs-on"] != "ubuntu-24.04":
+        raise ContractError(f"{path.name}: {name} job must use ubuntu-24.04")
+    timeout = int(job.values["timeout-minutes"])
+    if timeout < 60 or timeout > 180:
+        raise ContractError(f"{path.name}: {name} timeout is outside the approved range")
+    for step in job.steps:
+        reject_step_controls(step)
+        if not set(step.values) <= {"name", "uses", "run"} or not set(step.nested) <= {"with"}:
+            raise ContractError(f"{path.name}: unsupported container workflow step")
+    uses = [step for step in job.steps if "uses" in step.values]
+    expected_uses = [CHECKOUT_ACTION] + ([CACHE_ACTION] if cache else [])
+    if [step.values["uses"] for step in uses] != expected_uses:
+        raise ContractError(f"{path.name}: action dependencies must use approved immutable commits")
+    if not job.steps or job.steps[0].values.get("uses") != CHECKOUT_ACTION:
+        raise ContractError(f"{path.name}: checkout must be the first step")
+    command_steps = [step for step in job.steps if "run" in step.values]
+    if tuple(step.run.strip() for step in command_steps) != commands:
+        raise ContractError(f"{path.name}: container verification commands are not canonical")
+    if cache:
+        cache_steps = [step for step in uses if step.values["uses"] == CACHE_ACTION]
+        if len(cache_steps) != 1 or cache_steps[0].nested.get("with") != {
+            "path": ".verify-cache",
+            "key": "verify-references-${{ hashFiles('tools/reference_versions.env', 'tools/tool_versions.env') }}",
+        }:
+            raise ContractError(f"{path.name}: reference cache contract is not canonical")
+
+
+def check_container_workflows(
+    parsed: dict[str, tuple[Path, list[YamlLine], dict[str, WorkflowJob]]]
+) -> None:
+    rtl_path, _, rtl_jobs = parsed["rtl-tests.yml"]
+    check_container_job(
+        rtl_path,
+        rtl_jobs,
+        "verification",
+        (
+            "python3 tools/verification.py container --profile fast",
+            "python3 tools/verification.py container --profile directed-memory",
+            "python3 tools/verification.py container --profile directed-predictor",
+        ),
+        False,
+    )
+    compliance_path, _, compliance_jobs = parsed["compliance.yml"]
+    check_container_job(
+        compliance_path,
+        compliance_jobs,
+        "compliance",
+        ("python3 tools/verification.py container --profile compliance",),
+        True,
+    )
+    lockstep_path, _, lockstep_jobs = parsed["lockstep.yml"]
+    check_container_job(
+        lockstep_path,
+        lockstep_jobs,
+        "lockstep",
+        (
+            "python3 tools/verification.py container --profile lockstep",
+            "python3 tools/verification.py container --profile random-spike",
+        ),
+        True,
+    )
+
+
 def check_workflows(root: Path) -> None:
     workflow_dir = root / ".github/workflows"
     parsed: dict[str, tuple[Path, list[YamlLine], dict[str, WorkflowJob]]] = {}
@@ -856,6 +935,10 @@ def check_workflows(root: Path) -> None:
         lines = workflow_lines(path)
         check_triggers(path, lines)
         parsed[name] = (path, lines, parse_jobs(path, lines))
+
+    if "verification" in parsed["rtl-tests.yml"][2]:
+        check_container_workflows(parsed)
+        return
 
     rtl_path, _, rtl_jobs = parsed["rtl-tests.yml"]
     fast_job = required_job(rtl_path, rtl_jobs, "lint-and-test")
@@ -1132,6 +1215,16 @@ def workflow_seed(root: Path) -> int:
         match = re.fullmatch(r"make soak-lockstep SEEDS=([1-9][0-9]*)", step.run.strip())
         if match:
             seeds.append(int(match.group(1)))
+        if step.run.strip() == "python3 tools/verification.py container --profile random-spike":
+            source = (root / "tools/verification.py").read_text(encoding="utf-8")
+            matches = re.findall(
+                r'Command\("random-spike".*?"SEEDS=([1-9][0-9]*)"',
+                source,
+                re.DOTALL,
+            )
+            if len(matches) != 1:
+                raise ContractError("random-spike profile must expose one seed count")
+            seeds.append(int(matches[0]))
     if len(seeds) != 1:
         raise ContractError("lockstep workflow must expose one Spike random seed count")
     return seeds[0]
@@ -1150,7 +1243,10 @@ def check_repository_evidence(root: Path) -> None:
 
     rtl_path = root / ".github/workflows/rtl-tests.yml"
     rtl_jobs = parse_jobs(rtl_path, workflow_lines(rtl_path))
-    matrix = parse_directed_matrix(required_job(rtl_path, rtl_jobs, "test-matrix").lines)
+    if "verification" in rtl_jobs:
+        matrix = DIRECTED_MATRIX
+    else:
+        matrix = parse_directed_matrix(required_job(rtl_path, rtl_jobs, "test-matrix").lines)
     expected = {
         "ISA": CANONICAL_ISA,
         "DIRECTED_TESTS": str(len(tests)),
