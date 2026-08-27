@@ -2,9 +2,9 @@
 
 A 5-stage pipelined `RV32I_Zicsr_Zifencei` core in SystemVerilog — forwarding, branch prediction, precise exceptions, and a parameterised I/D cache hierarchy. Its directed, architecture-signature, and retirement-lockstep flows are independently gated, with current measurement provenance tracked in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
-[![RTL Tests](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/rtl-tests.yml/badge.svg)](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/rtl-tests.yml)
-[![RISC-V Compliance Suite](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/compliance.yml/badge.svg)](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/compliance.yml)
-[![Spike Lockstep](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/lockstep.yml/badge.svg)](https://github.com/HuyHuy-bit/rv32i-pipeline/actions/workflows/lockstep.yml)
+[![RTL Tests](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/rtl-tests.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/rtl-tests.yml)
+[![RISC-V Compliance Suite](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/compliance.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/compliance.yml)
+[![Spike Lockstep](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/lockstep.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/lockstep.yml)
 
 <details>
 <summary>Machine-checked repository facts</summary>
@@ -50,18 +50,16 @@ Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. 
 
 ## Synthesis
 
-The table below is a historical Vivado 2025.2 route snapshot for `xc7a35ticsg324-1L` with 512-word backing memories and a 2 ns constraint. It is retained as design history, not current headline evidence; the reproducible four-route rerun is tracked in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+This current Vivado 2025.2 matrix uses `xc7a35ticsg324-1L`, 512-word backing memories, and a deliberately aggressive 2 ns constraint. `fmax` is calculated from the routed critical path; the negative WNS values make clear that none of these configurations closes at 500 MHz. Exact commits, commands, and report hashes are in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
-| Config | fmax | LUT | FF | BRAM |
-|---|---|---|---|---|
-| core only | 75.3 MHz | 3,990 (19%) | 4,966 (12%) | 0 |
-| + 1KB I$ (4-way) | 76.1 MHz | 5,029 (24%) | 6,942 (17%) | 4 × RAMB18 |
-| + 4KB D$ write-through | 71.6 MHz | 8,306 (40%) | 13,461 (32%) | 8 × RAMB18 |
-| + 4KB D$ write-back | 73.5 MHz | 9,256 (45%) | 13,491 (32%) | 8 × RAMB18 |
+| Config | fmax | WNS | LUT | FF | BRAM tiles |
+|---|---:|---:|---:|---:|---:|
+| core only | 76.272 MHz | −11.111 ns | 4,031 (19.4%) | 5,220 (12.5%) | 0.5 |
+| + 1KB I$ (4-way) | 73.730 MHz | −11.563 ns | 5,011 (24.1%) | 6,970 (16.8%) | 2 |
+| + 4KB D$ write-through | 70.562 MHz | −12.172 ns | 8,800 (42.3%) | 13,527 (32.5%) | 4 |
+| + 4KB D$ write-back | 71.839 MHz | −11.920 ns | 9,218 (44.3%) | 13,517 (32.5%) | 4 |
 
-Within that historical snapshot, the rows compare the cache configurations under one routing setup. They show the full hierarchy fitting in **45% of the device instead of 71%**, because the Block RAM rework applies to both caches, and a **+950 LUT** write-back cost over write-through for dirty-bit and writeback-FSM logic.
-
-The fmax figures are *lower* than earlier revisions of this table reported (the D-cache rows previously read ~76 MHz). That is not a regression from the Block RAM work — that change measurably *improved* fmax by 9.8%, see below. It is the accumulated cost of everything added since those numbers were taken: interrupts, the return-address stack, and the gshare predictor. The core-only row shows the same effect in isolation, 79.2 → 75.3 MHz.
+The current write-back policy costs 418 LUT over write-through while using the same four BRAM tiles. The full hierarchy still fits below 45% LUT and 33% flip-flop utilization. Historical inference experiments below explain how the cache arrays reached Block RAM; they are retained as design studies, not mixed into the current headline matrix.
 
 Getting the D-cache to fit took four RTL revisions, and the intermediate results were the lesson: a registered read alone changed nothing (316% → 315% LUT); splitting the `[WAYS][SETS][BLOCK_WORDS]` array into per-way flat arrays did the real work (→ 82%); and `ram_style="block"` was *refused* until the two write addresses in one `always_ff` were muxed into one — a BRAM port has a single address input. Full progression in [`docs/MICROARCHITECTURE.md`](docs/MICROARCHITECTURE.md#synthesis).
 
@@ -78,7 +76,7 @@ The core-only row dropped from an earlier 79.2 MHz once interrupt support added 
 
 ## Performance
 
-This historical benchmark snapshot covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The current four-configuration rerun is pending in the evidence ledger.
+This current benchmark matrix covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The first three columns use 10-cycle instruction/data memory; the final column uses ideal one-cycle memory. It was measured on the frozen RTL in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 | kernel | no caches | +1KB I$ | +4KB write-back D$ | ideal 1-cycle memory |
 |---|---|---|---|---|
@@ -154,9 +152,9 @@ The synthesis wrapper honors `VIVADO=/path/to/vivado`, then native Vivado, then 
 
 ## Limitations
 
-- **fmax is a working number, not a good one.** ~75–77 MHz with one small timing optimization attempted (registering the interrupt timer comparator, +0.45%): no retiming of the tag-compare/way-select path, no shortening of the redirect priority chain, and this build appears congestion-bound rather than logic-depth-bound, so the next win likely isn't another single-chain fix.
+- **fmax is a working number, not a good one.** The current matrix spans 70.6–76.3 MHz and misses the 500 MHz constraint in every configuration. No retiming of the tag-compare/way-select path or shortening of the redirect priority chain has been attempted; the build appears congestion-bound rather than logic-depth-bound.
 - **The pipeline freezes globally on a memory stall** rather than letting the back end drain through a fetch miss. It inflates cached and uncached numbers alike, so it doesn't manufacture a speedup — but a decoupled front end would make the I-cache look less essential than it does here.
-- **The backing memories still don't use Block RAM.** The I-cache now does (see Synthesis); `instr_mem.sv`/`data_mem.sv` still read combinationally, which is what keeps them in flip-flops. Same fix applies, not done because they're a simulation-scale stand-in for real memory rather than part of the core.
+- **The backing memories are simulation-scale arrays, not an SoC memory subsystem.** `instr_mem.sv`/`data_mem.sv` retain combinational interfaces while the caches use synchronous Block-RAM-friendly arrays. Replacing the backing stores with a real BRAM or bus interface remains integration work.
 - **`FENCE.I` works, but this core can't demonstrate what it's for.** It decodes, invalidates the I-cache, and refetches — measurably: an identical loop goes from 3 I-cache misses to 43 with a `fence.i` in the body. What it can't show is self-modifying code becoming visible, because `instr_mem.sv` and `data_mem.sv` are *separate arrays* (a Harvard split), so a store never reaches code space at all — with or without `FENCE.I`. Unifying them is the prerequisite, and it's a memory-system change, not an ISA one.
 - **Random testing still excludes traps and CSRs.** `make soak-lockstep` now generates branches and jumps (13% of emitted instructions) and compares against Spike retirement-by-retirement, so control flow is no longer the blind spot it was — but trap-taking and CSR sequences are still directed-test-only, because generating them randomly needs the generator to model privilege state, not just instructions.
 

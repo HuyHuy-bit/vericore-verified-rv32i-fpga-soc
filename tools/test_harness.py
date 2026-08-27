@@ -1248,7 +1248,7 @@ class LockstepTest(unittest.TestCase):
 
     def fake_simulator(self):
         return f"""#!{sys.executable}
-import os, signal, sys, time
+import os, sys, time
 mode = os.environ.get("FAKE_SIM_MODE", "equal")
 trace = ""
 for arg in sys.argv[1:]:
@@ -1284,15 +1284,11 @@ sys.exit(7 if mode == "crash" else 0)
 
     def fake_spike(self):
         return f"""#!{sys.executable}
-import os, signal, sys, time
+import os, sys, time
 mode = os.environ.get("FAKE_SPIKE_MODE", "equal")
 open(os.environ["FAKE_SPIKE_MARKER"], "w").write(str(os.getpid()))
 def emit(pc, insn, tail=""):
     print(f"core   0: 3 0x{{pc}} (0x{{insn}}){{tail}}", file=sys.stderr, flush=True)
-def emit_terminal_on_shutdown(signum, frame):
-    emit("80000008", "0000006f")
-    sys.exit(0)
-if mode == "repeat_terminal": signal.signal(signal.SIGTERM, emit_terminal_on_shutdown)
 if mode == "crash":
     open(os.environ["FAKE_PIDFILE"], "w").write(str(os.getpid()))
     print("SPIKE-CRASH-DETAIL", file=sys.stderr, flush=True)

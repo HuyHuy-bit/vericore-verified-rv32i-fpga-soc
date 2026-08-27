@@ -141,21 +141,21 @@ See the README's [Performance](../README.md#performance) section for the full CP
 
 ## Synthesis
 
-The rows below are historical Vivado 2025.2 implementation studies for `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. They document how the cache arrays reached Block RAM and how routing changed, but they are not a current four-configuration headline matrix. The reproducible rerun and full provenance are tracked in [`EVIDENCE.md`](EVIDENCE.md).
+The current four-route matrix uses Vivado 2025.2, `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. Exact source identity and report hashes are tracked in [`EVIDENCE.md`](EVIDENCE.md).
 
-| Config | Result | fmax | LUT | FF | BRAM |
-|---|---|---|---|---|---|
-| core only (no caches) | Routed | 74.97 MHz | 3,990 / 20,800 (19%) | 4,966 / 41,600 (12%) | 0 / 50 |
-| + 1KB I-cache (4-way) | Routed | 76.1 MHz | 5,029 / 20,800 (24%) | 6,942 / 41,600 (17%) | 4 × RAMB18 |
-| + 4KB D-cache, write-through | Routed | 71.6 MHz | 8,306 / 20,800 (40%) | 13,461 / 41,600 (32%) | 8 × RAMB18 |
-| + 4KB D-cache, write-back | Routed | 73.5 MHz | 9,256 / 20,800 (45%) | 13,491 / 41,600 (32%) | 8 × RAMB18 |
+| Config | Result | fmax | WNS | LUT | FF | BRAM tiles |
+|---|---|---:|---:|---:|---:|---:|
+| core only (no caches) | Routed | 76.272 MHz | −11.111 ns | 4,031 / 20,800 (19.4%) | 5,220 / 41,600 (12.5%) | 0.5 / 50 |
+| + 1KB I-cache (4-way) | Routed | 73.730 MHz | −11.563 ns | 5,011 / 20,800 (24.1%) | 6,970 / 41,600 (16.8%) | 2 / 50 |
+| + 4KB D-cache, write-through | Routed | 70.562 MHz | −12.172 ns | 8,800 / 20,800 (42.3%) | 13,527 / 41,600 (32.5%) | 4 / 50 |
+| + 4KB D-cache, write-back | Routed | 71.839 MHz | −11.920 ns | 9,218 / 20,800 (44.3%) | 13,517 / 41,600 (32.5%) | 4 / 50 |
 
-Within the historical routing snapshot, two results were visible:
+The current comparison shows two direct costs:
 
-- **The full hierarchy now fits in 45% of the device rather than 71%**, because the Block RAM pattern applies to both caches. The earlier table's D-cache rows carried a flip-flop I-cache alongside a BRAM D-cache, which is what made them look near-full.
-- **Write-back costs +950 LUT over write-through** (9,256 vs 8,306) for the dirty bits and the extra FSM states, at essentially identical flip-flop count. That is the area price to set against the CPI wins in the README's Performance table — where write-back is not a uniform improvement either.
+- **The full hierarchy fits below 45% LUT and 33% flip-flop utilization**, with both cache configurations using four BRAM tiles in total.
+- **Write-back costs 418 LUT over write-through** (9,218 vs 8,800) for dirty-state and writeback control, with essentially identical flip-flop and BRAM use.
 
-The rows were collected at different repository points: the core-only row includes later interrupt work, while the cache rows predate it. They therefore remain implementation history rather than a valid current cross-configuration comparison.
+All four rows were routed from the same frozen RTL and tooling commits. The negative WNS values are intentional evidence that the 2 ns target is not met; `fmax` is derived from each routed critical path rather than presented as timing closure.
 
 Getting the D-cache rows to exist at all took two rounds of RTL work, and the intermediate measurements are more instructive than the final table:
 
@@ -209,7 +209,7 @@ The fix is a one-line, well-precedented change: register the comparison instead 
 
 The targeted mechanism shrank exactly as predicted — logic delay on the worst path dropped 31%, `CARRY4` count halved — but the net fmax gain is only **+0.34 MHz (+0.45%)**, because a second, nearly-as-expensive path (route-delay-dominated: 79.75% route vs. 70.6% before) immediately took over as the new worst case. That's the honest result, not a disappointing one: this out-of-context build at this size is routing/congestion-bound, not logic-depth-bound, so fixing one specific chain reliably surfaces the next-worst one rather than moving fmax by the full amount the fixed chain's cost would suggest. A real win here would need either a less congested/larger device or a placement-aware pass, neither of which is "one optimization."
 
-Revised reading of the CPI table in light of all this: the README's speedup numbers were always stated as CPI upper bounds pending an fmax figure. All four configurations now land within ~79–76 MHz of each other, so frequency is roughly flat across the sweep and the CPI comparison is close to a fair proxy for throughput — but note the caches cost ~3 MHz rather than being free, and the registered read they now require costs real cycles too (the write-back CPI figures in the README rose from ~1.18 to ~2.3 as a direct result). The honest summary is that this core's cache benefit is smaller than the CPI-only table suggested, in two separate ways that only synthesis could expose.
+Revised reading of the CPI table in light of all this: the current configurations span 70.6–76.3 MHz, so frequency is similar enough that CPI remains a useful first-order throughput comparison, but caches are not frequency-free. Their registered reads also cost cycles: the current write-back benchmark lands around 2.0–2.5 CPI rather than the ideal-memory 1.0–1.25 CPI. The honest summary is that simulation and routing both expose costs that a hit-rate-only comparison hides.
 
 ## Verification summary
 
@@ -225,9 +225,9 @@ See [`docs/VERIFICATION_PLAN.md`](VERIFICATION_PLAN.md) for the full breakdown. 
 
 Kept in the same honest tone as the README's Notes section, because a list like this is worth more than it costs to write:
 
-- **The backing memories still don't use Block RAM.** Both caches use the per-way flat-array structure needed for Block RAM inference, but `instr_mem.sv` and `data_mem.sv` remain combinational simulation-scale arrays.
-- **fmax is still a working number, not a good one.** One timing optimization was attempted and measured (registering the interrupt-timer comparator, +0.45% — see Synthesis above), but the build is congestion-bound at this device size, not logic-depth-bound, so a single-chain fix like that one reliably surfaces the next-worst path rather than moving fmax by much. No retiming of the tag-compare/way-select path, no shortening of the redirect priority mux — both remain real, unattempted next steps.
-- **No decoupled front end, no non-blocking caches, no store buffer.** All three are real, well-understood next steps (10b/10c in the improvement plan). Each is a significant redesign of the freeze/flush/redirect logic the rest of this project's verification work protects, and — unlike when this note was first written — the Spike lockstep regression net now exists to validate them against; none have been attempted yet regardless.
+- **The backing memories are still simulation-scale arrays.** Both caches use the per-way flat-array structure needed for Block RAM inference, while `instr_mem.sv` and `data_mem.sv` retain combinational interfaces rather than a production BRAM or bus protocol.
+- **fmax is still a working number, not a good one.** The current matrix spans 70.6–76.3 MHz and misses the aggressive 500 MHz target. No retiming of the tag-compare/way-select path or shortening of the redirect priority mux has been attempted.
+- **No decoupled front end, no non-blocking caches, no store buffer.** Each is a significant redesign of the freeze/flush/redirect logic the Spike lockstep regression now protects; none has been attempted.
 - **`FENCE.I` cannot demonstrate unified-memory coherence.** It commits, invalidates the I-cache, flushes younger fetches, and refetches from `pc+4`; the separate instruction/data backing arrays prevent stores to code space, so self-modifying-code visibility is outside this memory model.
 - **No AXI wrapper.** The bespoke `req`/`burst`/`ready` memory-port protocol works but isn't the industry-standard interface an SoC integration would expect.
 - **No external interrupt.** `mie`/`mip` only implement the software and timer bits; there's no `mip.MEIP` and nothing to drive it, since this core has no interrupt controller or SoC fabric to source an external interrupt from.
