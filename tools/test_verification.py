@@ -49,13 +49,16 @@ class ProfileTest(unittest.TestCase):
             "lockstep",
             "random-spike",
             "coverage",
-            "results-check",
-            "portfolio-render-check",
-            "portfolio-check",
         )
         positions = tuple(names.index(name) for name in boundaries)
         self.assertEqual(positions, tuple(sorted(positions)))
         self.assertEqual(len(names), len(set(names)))
+
+    def test_portfolio_profile_checks_published_artifacts(self):
+        self.assertEqual(
+            tuple(command.name for command in commands_for("portfolio", ROOT)),
+            ("results-check", "portfolio-render-check", "portfolio-check"),
+        )
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaisesRegex(VerificationError, "unknown verification profile"):

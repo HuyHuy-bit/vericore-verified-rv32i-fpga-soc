@@ -96,6 +96,7 @@ def profile_commands() -> dict[str, tuple[Command, ...]]:
         "lockstep": lockstep,
         "random-spike": random_spike,
         "coverage": coverage,
+        "portfolio": final_checks,
     }
     profiles["full"] = (
         *fast,
@@ -106,7 +107,6 @@ def profile_commands() -> dict[str, tuple[Command, ...]]:
         *lockstep,
         *random_spike,
         *coverage,
-        *final_checks,
     )
     return profiles
 

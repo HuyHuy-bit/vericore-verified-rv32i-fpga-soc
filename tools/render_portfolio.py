@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import re
+import sys
+import tempfile
+
+if __package__:
+    from .results import ResultSet, load_result_set, validate_result_set
+else:
+    from results import ResultSet, load_result_set, validate_result_set
+
+
+DOCUMENT_BLOCKS = {
+    "README.md": ("snapshot", "verification", "benchmarks", "synthesis"),
+    "docs/EVIDENCE.md": ("facts", "verification", "benchmarks", "synthesis", "provenance"),
+    "docs/MICROARCHITECTURE.md": ("benchmarks", "synthesis"),
+    "docs/VERIFICATION_PLAN.md": ("summary",),
+}
+MARKER_RE = re.compile(r"<!-- portfolio:([a-z][a-z0-9-]*):(start|end) -->")
+
+
+class RenderError(ValueError):
+    pass
+
+
+def replace_block(source: str, name: str, contents: str) -> str:
+    start = f"<!-- portfolio:{name}:start -->"
+    end = f"<!-- portfolio:{name}:end -->"
+    if source.count(start) == 0 or source.count(end) == 0:
+        raise RenderError(f"missing marker for portfolio block {name}")
+    if source.count(start) != 1 or source.count(end) != 1:
+        raise RenderError(f"portfolio block {name} must have exactly one marker pair")
+    start_index = source.index(start)
+    end_index = source.index(end)
+    if start_index > end_index:
+        raise RenderError(f"portfolio block {name} start must appear before its end")
+    inner_start = start_index + len(start)
+    if MARKER_RE.search(source[inner_start:end_index]):
+        raise RenderError(f"nested marker in portfolio block {name}")
+    return source[:inner_start] + "\n" + contents.strip() + "\n" + source[end_index:]
+
+
+def percentage(numerator: int, denominator: int) -> str:
+    return "n/a" if denominator == 0 else f"{100.0 * numerator / denominator:.1f}%"
+
+
+def benchmark_table(result: ResultSet) -> str:
+    names = ("slow-memory", "icache", "write-back", "ideal-memory")
+    labels = ("10-cycle uncached", "+1KB 4-way I$", "+4KB 4-way WB D$", "1-cycle uncached")
+    rows = {(row["kernel"], row["configuration"]): row for row in result.benchmarks}
+    lines = [
+        "| Kernel | " + " | ".join(labels) + " |",
+        "|---|" + "---:|" * len(labels),
+    ]
+    for kernel in ("crc32", "matmul", "sort", "llist", "interp"):
+        cells = []
+        for name in names:
+            row = rows[(kernel, name)]
+            cycles = int(row["cycles"])
+            retired = int(row["instructions_retired"])
+            cells.append(f"{cycles:,} / {cycles / retired:.5f}")
+        lines.append(f"| {kernel} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def synthesis_table(result: ResultSet) -> str:
+    labels = {
+        "core": "Core",
+        "icache": "+1KB 4-way I$",
+        "dcache-wt": "+4KB 4-way WT D$",
+        "dcache-wb": "+4KB 4-way WB D$",
+    }
+    lines = [
+        "| Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in result.synthesis:
+        lines.append(
+            f"| {labels[row['configuration']]} | {int(row['lut']):,} | {int(row['ff']):,} | "
+            f"{row['bram_tiles']} | {row['wns_ns']} | {row['critical_path_ns']} | {row['fmax_mhz']} |"
+        )
+    return "\n".join(lines)
+
+
+def snapshot(result: ResultSet) -> str:
+    verification = result.verification
+    assertions = verification["assertions"]["concurrent"] + verification["assertions"]["immediate"]
+    return (
+        "> **Portfolio Snapshot**  \n"
+        f"> 5-stage `RV32I_Zicsr_Zifencei` • {verification['directed_programs']} directed tests × "
+        f"{len(verification['memory_configurations'])} memory configurations • "
+        f"{len(verification['predictor_configurations'])} predictor configurations • "
+        f"{verification['architecture_tests']['passed']}/{verification['architecture_tests']['discovered']} architecture signatures • "
+        f"{verification['architecture_lockstep']['passed']}/{verification['architecture_lockstep']['discovered']} Spike lockstep • "
+        f"{verification['spike_random']['passed']}/{verification['spike_random']['requested']} random Spike seeds • "
+        f"{assertions} assertions • {verification['cover_points']['hit']}/{verification['cover_points']['source']} functional cover points"
+    )
+
+
+def verification_table(result: ResultSet) -> str:
+    value = result.verification
+    return "\n".join((
+        "| Gate | Result |",
+        "|---|---:|",
+        f"| Decoder unit vectors | {value['decoder_vectors']:,}/{value['decoder_vectors']:,} |",
+        f"| Hazard unit vectors | {value['hazard_vectors']:,}/{value['hazard_vectors']:,} |",
+        f"| Harness tests | {value['harness_tests']}/{value['harness_tests']} |",
+        f"| Directed memory matrix | {sum(item['passed'] for item in value['memory_configurations'])}/{value['directed_programs'] * len(value['memory_configurations'])} |",
+        f"| Predictor matrix | {sum(item['passed'] for item in value['predictor_configurations'])}/{value['directed_programs'] * len(value['predictor_configurations'])} |",
+        f"| Architecture signatures | {value['architecture_tests']['passed']}/{value['architecture_tests']['discovered']} |",
+        f"| Architecture Spike lockstep | {value['architecture_lockstep']['passed']}/{value['architecture_lockstep']['discovered']} |",
+        f"| Python-model random | {value['python_random']['baseline']['passed'] + value['python_random']['cached']['passed']}/{value['python_random']['baseline']['requested'] + value['python_random']['cached']['requested']} |",
+        f"| Random Spike lockstep | {value['spike_random']['passed']}/{value['spike_random']['requested']} |",
+        f"| Functional cover points | {value['cover_points']['hit']}/{value['cover_points']['source']} |",
+    ))
+
+
+def facts(result: ResultSet) -> str:
+    value = result.verification
+    assertions = value["assertions"]["concurrent"] + value["assertions"]["immediate"]
+    matrix = ",".join(item["name"] for item in value["memory_configurations"])
+    return "\n".join((
+        "EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei",
+        f"EVIDENCE_FACT DIRECTED_TESTS={value['directed_programs']}",
+        f"EVIDENCE_FACT ASSERTIONS_TOTAL={assertions}",
+        f"EVIDENCE_FACT ASSERTIONS_CONCURRENT={value['assertions']['concurrent']}",
+        f"EVIDENCE_FACT ASSERTIONS_IMMEDIATE={value['assertions']['immediate']}",
+        f"EVIDENCE_FACT SOURCE_COVER_POINTS={value['cover_points']['source']}",
+        f"EVIDENCE_FACT TRACKED_COVERAGE_HIT={value['cover_points']['hit']}",
+        f"EVIDENCE_FACT TRACKED_COVERAGE_TOTAL={value['cover_points']['source']}",
+        "EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current",
+        f"EVIDENCE_FACT CI_CONFIGS={len(value['memory_configurations'])}",
+        f"EVIDENCE_FACT CI_MATRIX={matrix}",
+        f"EVIDENCE_FACT ARCH_TEST_SHA={result.tool_versions['architecture_test_commit']}",
+        f"EVIDENCE_FACT ARCH_TEST_EXPECTED={result.tool_versions['architecture_test_expected']}",
+        f"EVIDENCE_FACT SPIKE_SHA={result.tool_versions['spike_commit']}",
+        f"EVIDENCE_FACT SPIKE_RANDOM_SEEDS={value['spike_random']['requested']}",
+    ))
+
+
+def provenance(result: ResultSet) -> str:
+    tools = result.tool_versions
+    synth = result.synthesis[0]
+    return "\n".join((
+        f"- Measurement timestamp: `{result.manifest['measured_at']}`",
+        f"- Tooling commit: `{result.manifest['tooling_commit']}`",
+        f"- Frozen RTL commit: `{result.manifest['rtl_commit']}`",
+        f"- Canonical container: `{tools['container']['image']}:{tools['container']['revision']}`",
+        f"- Open tools: Ubuntu {tools['ubuntu']}; Verilator {tools['verilator']}; RISC-V GCC {tools['riscv_gcc']}; Python {tools['python']}",
+        f"- Vivado: {synth['vivado_version']} build {synth['vivado_build']}; `{synth['part']}`; measured {synth['measurement_date']}",
+    ))
+
+
+def summary(result: ResultSet) -> str:
+    value = result.verification
+    user = value["coverage"]["user"]
+    return (
+        f"The release gate runs {value['directed_programs']} programs across "
+        f"{len(value['memory_configurations'])} memory configurations and "
+        f"{len(value['predictor_configurations'])} predictor configurations. "
+        f"Pinned architecture signatures and complete Spike traces both pass "
+        f"{value['architecture_tests']['passed']}/{value['architecture_tests']['discovered']}; "
+        f"random Spike lockstep passes {value['spike_random']['passed']}/{value['spike_random']['requested']}; "
+        f"functional coverage is {user['hit']}/{user['total']} ({percentage(user['hit'], user['total'])})."
+    )
+
+
+def block_contents(result: ResultSet) -> dict[str, str]:
+    return {
+        "snapshot": snapshot(result),
+        "verification": verification_table(result),
+        "benchmarks": benchmark_table(result),
+        "synthesis": synthesis_table(result),
+        "facts": facts(result),
+        "provenance": provenance(result),
+        "summary": summary(result),
+    }
+
+
+def render_documents(root: Path, result_set: ResultSet) -> dict[Path, str]:
+    root = root.resolve()
+    contents = block_contents(result_set)
+    rendered: dict[Path, str] = {}
+    for relative, names in DOCUMENT_BLOCKS.items():
+        path = root / relative
+        try:
+            source = path.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise RenderError(f"missing portfolio document: {relative}") from exc
+        found = {name for name, _ in MARKER_RE.findall(source)}
+        if found != set(names):
+            extra = found - set(names)
+            missing = set(names) - found
+            detail = f"unknown block {sorted(extra)[0]}" if extra else f"missing block {sorted(missing)[0]}"
+            raise RenderError(f"{relative}: {detail}")
+        for name in names:
+            source = replace_block(source, name, contents[name])
+        rendered[path] = source
+    return rendered
+
+
+def load_validated(root: Path) -> ResultSet:
+    errors = validate_result_set(root / "results", root)
+    if errors:
+        raise RenderError("result records are invalid: " + "; ".join(errors))
+    return load_result_set(root / "results")
+
+
+def check_documents(root: Path) -> list[str]:
+    root = root.resolve()
+    try:
+        rendered = render_documents(root, load_validated(root))
+    except (RenderError, OSError) as exc:
+        return [str(exc)]
+    return [f"stale generated portfolio block: {path.relative_to(root)}" for path, value in rendered.items() if path.read_text(encoding="utf-8") != value]
+
+
+def write_documents(root: Path) -> None:
+    root = root.resolve()
+    rendered = render_documents(root, load_validated(root))
+    staged: dict[Path, Path] = {}
+    try:
+        for path, value in rendered.items():
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", delete=False,
+            ) as handle:
+                handle.write(value)
+                staged[path] = Path(handle.name)
+            staged[path].chmod(path.stat().st_mode)
+        for path, temporary in staged.items():
+            temporary.replace(path)
+    finally:
+        for temporary in staged.values():
+            if temporary.exists():
+                temporary.unlink()
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--check", action="store_true")
+    group.add_argument("--write", action="store_true")
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        if args.write:
+            write_documents(args.root)
+            print("rendered portfolio documentation")
+            return 0
+        errors = check_documents(args.root)
+        if errors:
+            for error in errors:
+                print(f"portfolio render check failed: {error}", file=sys.stderr)
+            return 1
+        print("portfolio documentation matches result records")
+        return 0
+    except (RenderError, OSError, ValueError) as exc:
+        print(f"portfolio rendering failed: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

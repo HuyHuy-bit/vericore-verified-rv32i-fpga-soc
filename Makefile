@@ -53,7 +53,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -275,6 +275,13 @@ results-synth:
 
 results-open:
 	python3 tools/results.py collect-open --run-dir "$(RESULT_RUN_DIR)" --output results
+
+portfolio-render:
+	python3 tools/render_portfolio.py --write
+
+portfolio-render-check:
+	python3 -m unittest -v tools.test_render_portfolio
+	python3 tools/render_portfolio.py --check
 
 clean:
 	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov* obj_dir_lockstep* coverage tests/*.hex tests/*.vcd cpu.vcd
