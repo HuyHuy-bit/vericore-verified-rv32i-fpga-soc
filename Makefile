@@ -46,7 +46,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all sim assemble test unit harness-test evidence-check check env-check env-check-native memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary
+.PHONY: all sim assemble test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -106,7 +106,7 @@ harness-test: sim
 		python3 -m unittest -v tools.test_harness.HarnessTest.test_tohost_bypasses_dcache
 
 evidence-check:
-	python3 -m unittest -v tools.test_evidence_check
+	python3 -m unittest -v tools.test_tool_environment tools.test_verification tools.test_evidence_check
 	python3 tools/evidence_check.py
 
 check: unit harness-test lint evidence-check
@@ -116,6 +116,20 @@ env-check:
 
 env-check-native:
 	python3 tools/tool_environment.py native
+
+VERIFY_PROFILE ?= full
+verify:
+	python3 tools/verification.py container --profile full
+
+verify-native:
+	python3 tools/tool_environment.py native --require-references
+	python3 tools/verification.py run --profile full
+
+verify-profile:
+	python3 tools/verification.py run --profile $(VERIFY_PROFILE)
+
+verify-image:
+	python3 tools/verification.py image
 
 # Run the C benchmark kernels and print the CPI table.
 bench: sim
