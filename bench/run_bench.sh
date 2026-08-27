@@ -17,6 +17,7 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$BENCH_DIR")"
 LD="$ROOT/compliance/link/rv32i-pipeline.ld"
 ELF2HEX="$ROOT/compliance/elf2hex.py"
+RUNTIME="$BENCH_DIR/rv32i_runtime.c"
 WORK=""
 CSV_STAGE=""
 CYCLES=600000         # testbench timeout multiplier, not a cycle budget
@@ -70,6 +71,7 @@ trap cleanup EXIT
 /usr/bin/python3 "$ROOT/tools/configuration.py" --btb-idx-bits "$BTB_IDX_BITS" \
     --btb-tag-bits "$BTB_TAG_BITS" --gshare "$GSHARE" --ras-depth "$RAS_DEPTH" \
     || exit 1
+[ -f "$RUNTIME" ] || die "RV32I software runtime is missing"
 
 if [ -n "${RESULT_CSV:-}" ]; then
     case "${RESULT_CONFIG:-}" in
@@ -168,7 +170,7 @@ for k in "${KERNELS[@]}"; do
     # --- target build ---
     if ! riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -O2 -static -mcmodel=medany \
             -nostdlib -nostartfiles -ffreestanding -fno-builtin -fno-jump-tables \
-            -T "$LD" "$BENCH_DIR/crt0.S" "$src" -o "$WORK/$k.elf" -lgcc \
+            -T "$LD" "$BENCH_DIR/crt0.S" "$RUNTIME" "$src" -o "$WORK/$k.elf" \
             2> "$WORK/$k.build.log"; then
         echo "$k: target build failed - see $WORK/$k.build.log" >&2
         FAIL=1; continue

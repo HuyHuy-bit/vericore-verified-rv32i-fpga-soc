@@ -829,6 +829,7 @@ class BenchmarkRunnerTest(unittest.TestCase):
         (self.repo / "rtl").mkdir()
         (self.repo / "tools").mkdir()
         shutil.copy2(ROOT / "bench/run_bench.sh", self.repo / "bench/run_bench.sh")
+        shutil.copy2(ROOT / "bench/rv32i_runtime.c", self.repo / "bench/rv32i_runtime.c")
         shutil.copy2(ROOT / "tools/configuration.py", self.repo / "tools/configuration.py")
         for name in ("host_main.c", "crt0.S"):
             (self.repo / "bench" / name).write_text("placeholder\n")
@@ -989,6 +990,11 @@ exec "$FAKE_FALLBACK_SIM" "$@"
         expected = ROOT / "obj_dir_ic1024_4_4_dc4096_4_4_1_L10_10_bp6_10_0_8/Vcpu"
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(f'SIM="{expected}"', result.stdout)
+
+    def test_benchmark_uses_the_local_rv32i_runtime(self):
+        source = (ROOT / "bench/run_bench.sh").read_text()
+        self.assertIn('"$RUNTIME" "$src"', source)
+        self.assertNotIn("-lgcc", source)
 
 
 class ComplianceRunnerTest(unittest.TestCase):

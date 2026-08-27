@@ -2,7 +2,7 @@
  *
  * Two things at once: strided access over three 1KB arrays (row-major reads
  * of `a` are sequential, column-major reads of `b` are not), and 4096 calls
- * into libgcc's __mulsi3, because rv32i has no hardware multiply. When the
+ * into the software __mulsi3, because rv32i has no hardware multiply. When the
  * M extension lands, the second half of that cost disappears.
  *
  * Note: no const/global initialised data anywhere in these kernels. .rodata

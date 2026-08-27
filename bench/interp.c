@@ -31,7 +31,7 @@ unsigned bench(void) {
         seed ^= seed >> 17;
         seed ^= seed << 5;
         /* Reduce to an opcode here, not in the dispatch loop: rv32i has no
-         * hardware divide, so a % in the hot path would measure libgcc's
+         * hardware divide, so a % in the hot path would measure the software
          * modulo routine instead of the interpreter. */
         prog[i] = (unsigned char)((seed >> 8) % 20u);
     }

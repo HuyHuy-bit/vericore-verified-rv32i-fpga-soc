@@ -140,7 +140,7 @@ harness-test: sim
 	python3 -m unittest -v tools.test_arch_compat
 	python3 -m unittest -v tools.test_tool_environment tools.test_configuration tools.test_verification \
 		tools.test_prepare_references tools.test_results tools.test_render_portfolio \
-		tools.test_portfolio_demo
+		tools.test_portfolio_demo tools.test_runtime
 	@$(MAKE) --no-print-directory sim IC_BYTES=0 DC_BYTES=4096 DC_WAYS=4 DC_WB=0 IMEM_LAT=1 DMEM_LAT=10
 	SIM="$(CURDIR)/obj_dir_ic0_4_1_dc4096_4_4_0_L1_10_bp6_10_0_8/Vcpu" \
 		python3 -m unittest -v tools.test_harness.HarnessTest.test_tohost_bypasses_dcache
