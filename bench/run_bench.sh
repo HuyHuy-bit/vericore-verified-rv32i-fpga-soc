@@ -18,6 +18,7 @@ ROOT="$(dirname "$BENCH_DIR")"
 LD="$ROOT/compliance/link/rv32i-pipeline.ld"
 ELF2HEX="$ROOT/compliance/elf2hex.py"
 WORK=""
+CSV_STAGE=""
 CYCLES=600000         # testbench timeout multiplier, not a cycle budget
 
 # Positional args cover latency and the I-cache; the D-cache is configured
@@ -45,6 +46,9 @@ die() {
 
 cleanup() {
     local status=$?
+    if [ -n "$CSV_STAGE" ] && [ -f "$CSV_STAGE" ]; then
+        rm -f "$CSV_STAGE"
+    fi
     if [ -n "$WORK" ] && [ -d "$WORK" ]; then
         if [ "$status" -eq 0 ] && [ "${KEEP_WORK:-0}" != 1 ]; then
             rm -rf "$WORK"
@@ -66,6 +70,29 @@ trap cleanup EXIT
 /usr/bin/python3 "$ROOT/tools/configuration.py" --btb-idx-bits "$BTB_IDX_BITS" \
     --btb-tag-bits "$BTB_TAG_BITS" --gshare "$GSHARE" --ras-depth "$RAS_DEPTH" \
     || exit 1
+
+if [ -n "${RESULT_CSV:-}" ]; then
+    case "${RESULT_CONFIG:-}" in
+        slow-memory)
+            [ "$LATENCY:$IC_BYTES:$IC_BLOCK:$IC_WAYS:$DC_BYTES:$DC_BLOCK:$DC_WAYS:$DC_WB" = "10:0:4:1:0:4:1:0" ] || die "slow-memory result geometry mismatch" ;;
+        icache)
+            [ "$LATENCY:$IC_BYTES:$IC_BLOCK:$IC_WAYS:$DC_BYTES:$DC_BLOCK:$DC_WAYS:$DC_WB" = "10:1024:4:4:0:4:1:0" ] || die "icache result geometry mismatch" ;;
+        write-back)
+            [ "$LATENCY:$IC_BYTES:$IC_BLOCK:$IC_WAYS:$DC_BYTES:$DC_BLOCK:$DC_WAYS:$DC_WB" = "10:1024:4:4:4096:4:4:1" ] || die "write-back result geometry mismatch" ;;
+        ideal-memory)
+            [ "$LATENCY:$IC_BYTES:$IC_BLOCK:$IC_WAYS:$DC_BYTES:$DC_BLOCK:$DC_WAYS:$DC_WB" = "1:0:4:1:0:4:1:0" ] || die "ideal-memory result geometry mismatch" ;;
+        *) die "RESULT_CONFIG must name a headline configuration" ;;
+    esac
+    TOOLING_COMMIT="${TOOLING_COMMIT:-$(git -C "$ROOT" rev-parse HEAD)}"
+    RTL_COMMIT="${RTL_COMMIT:-$(git -C "$ROOT" log -1 --format=%H -- rtl cpu_tb.cpp)}"
+    [[ "$TOOLING_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "invalid TOOLING_COMMIT"
+    [[ "$RTL_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "invalid RTL_COMMIT"
+    result_parent=$(dirname "$RESULT_CSV")
+    [ -d "$result_parent" ] || die "result output directory does not exist"
+    CSV_STAGE=$(mktemp "$result_parent/.benchmarks.csv.XXXXXX") || die "could not stage benchmark CSV"
+    PYTHONPATH="$ROOT" python3 -c 'from tools.results import BENCHMARK_FIELDS; print(",".join(BENCHMARK_FIELDS))' > "$CSV_STAGE" \
+        || die "could not write benchmark CSV heading"
+fi
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-bench.XXXXXX") \
     || die "could not create benchmark work directory"
@@ -188,16 +215,42 @@ for k in "${KERNELS[@]}"; do
         FAIL=1; continue
     fi
 
+    cycles=$(get cycles "$perf")
+    instret=$(get instret "$perf")
+    memstall=$(get memstall "$perf")
+    branches=$(get branches "$bp")
+    mispredicts=$(get mispredicts "$bp")
+    ic_accesses=$(get accesses "$ic")
+    ic_misses=$(get misses "$ic")
+    dc_accesses=$(get accesses "$dc")
+    dc_misses=$(get misses "$dc")
+    for metric in "$cycles" "$instret" "$memstall" "$branches" "$mispredicts" \
+            "$ic_accesses" "$ic_misses" "$dc_accesses" "$dc_misses"; do
+        if [[ ! "$metric" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "$k: malformed performance counters - see $WORK/$k.run.log" >&2
+            FAIL=1
+            continue 2
+        fi
+    done
+
     if [ "$IC_BYTES" -eq 0 ]; then ichr="-"; else ichr="$(get hitrate "$ic")%"; fi
     if [ "$DC_BYTES" -eq 0 ]; then dchr="-"; else dchr="$(get hitrate "$dc")%"; fi
     printf '%-10s %10s %10s %7s %10s %8s%% %10s %10s' \
-        "$k" "$(get cycles "$perf")" "$(get instret "$perf")" "$(get CPI "$perf")" \
-        "$(get memstall "$perf")" "$(get accuracy "$bp")" "$ichr" "$dchr"
+        "$k" "$cycles" "$instret" "$(get CPI "$perf")" \
+        "$memstall" "$(get accuracy "$bp")" "$ichr" "$dchr"
 
     if [ $rc -ne 0 ]; then
         got=$(sed -n 's/.*x10  got=0x\([0-9a-f]*\).*/\1/p' "$WORK/$k.run.log")
         printf '   WRONG RESULT (got 0x%s, expected %u)' "${got:-?}" "$expected"
         FAIL=1
+    elif [ -n "$CSV_STAGE" ]; then
+        [ "$DC_BYTES" -eq 0 ] && policy=none || { [ "$DC_WB" -eq 1 ] && policy=write-back || policy=write-through; }
+        printf '1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,pass,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+            "$TOOLING_COMMIT" "$RTL_COMMIT" "$RESULT_CONFIG" "$LATENCY" "$LATENCY" \
+            "$IC_BYTES" "$IC_BLOCK" "$IC_WAYS" "$DC_BYTES" "$DC_BLOCK" "$DC_WAYS" "$policy" \
+            "$BTB_IDX_BITS" "$BTB_TAG_BITS" "$GSHARE" "$RAS_DEPTH" "$k" \
+            "$cycles" "$instret" "$memstall" "$branches" "$mispredicts" \
+            "$ic_accesses" "$ic_misses" "$dc_accesses" "$dc_misses" >> "$CSV_STAGE"
     fi
     echo
 done
@@ -205,4 +258,9 @@ done
 echo
 [ $FAIL -eq 0 ] && echo "all kernels produced the expected result" \
                 || echo "one or more kernels failed - logs in $WORK"
+if [ $FAIL -eq 0 ] && [ -n "$CSV_STAGE" ]; then
+    [ "$(wc -l < "$CSV_STAGE")" -eq 6 ] || die "benchmark CSV is incomplete"
+    mv -f "$CSV_STAGE" "$RESULT_CSV" || die "could not publish benchmark CSV"
+    CSV_STAGE=""
+fi
 exit $FAIL

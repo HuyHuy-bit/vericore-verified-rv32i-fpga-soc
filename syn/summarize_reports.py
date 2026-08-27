@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
 import sys
+import tempfile
 
 if __package__:
     from .run_synth import CONFIGURATIONS, PART, PERIOD_NS
 else:
     from run_synth import CONFIGURATIONS, PART, PERIOD_NS
+
+SYNTHESIS_FIELDS = (
+    "schema", "tooling_commit", "rtl_commit", "measurement_date", "configuration",
+    "imem_words", "dmem_words", "icache_bytes", "icache_block_words", "icache_ways",
+    "dcache_bytes", "dcache_block_words", "dcache_ways", "dcache_policy",
+    "vivado_version", "vivado_build", "platform", "part", "clock_period_ns", "lut",
+    "ff", "bram_tiles", "ramb18", "wns_ns", "critical_path_ns", "fmax_mhz",
+    "utilization_sha256", "timing_sha256",
+)
 
 
 class SummaryError(RuntimeError):
@@ -100,7 +112,7 @@ def load_manifest(directory: Path, expected_name: str) -> dict[str, object]:
     return manifest
 
 
-def summarize(report_dir: Path) -> str:
+def collect_rows(report_dir: Path) -> tuple[dict[str, object], list[dict[str, object]]]:
     expected_names = tuple(config.name for config in CONFIGURATIONS)
     actual_names = tuple(sorted(path.name for path in report_dir.iterdir() if path.is_dir()))
     if set(actual_names) != set(expected_names):
@@ -125,7 +137,7 @@ def summarize(report_dir: Path) -> str:
         if any(manifest.get(key) != baseline.get(key) for key in provenance_keys):
             raise SummaryError(f"provenance mismatch for {name}")
 
-    rows = []
+    rows: list[dict[str, object]] = []
     for config in CONFIGURATIONS:
         directory = report_dir / config.name
         luts, ffs, bram_tiles, ramb18 = parse_utilization(directory / "utilization.rpt")
@@ -134,10 +146,46 @@ def summarize(report_dir: Path) -> str:
         if critical <= 0.0:
             raise SummaryError(f"invalid critical path for {config.name}")
         fmax = 1000.0 / critical
-        rows.append(
-            f"| {config.name} | {luts} | {ffs} | {bram_tiles:g} | {ramb18} | "
-            f"{wns:.3f} | {critical:.3f} | {fmax:.3f} |"
-        )
+        rows.append({
+            "schema": 1,
+            "tooling_commit": baseline["source_commit"],
+            "rtl_commit": baseline["rtl_commit"],
+            "measurement_date": baseline["measurement_date"],
+            "configuration": config.name,
+            "imem_words": config.imem_depth,
+            "dmem_words": config.dmem_depth,
+            "icache_bytes": config.ic_bytes,
+            "icache_block_words": config.ic_block,
+            "icache_ways": config.ic_ways,
+            "dcache_bytes": config.dc_bytes,
+            "dcache_block_words": config.dc_block,
+            "dcache_ways": config.dc_ways,
+            "dcache_policy": "none" if config.dc_bytes == 0 else ("write-back" if config.dc_wb else "write-through"),
+            "vivado_version": baseline["tool_version"],
+            "vivado_build": baseline["tool_build"],
+            "platform": baseline["platform"],
+            "part": baseline["part"],
+            "clock_period_ns": f"{float(baseline['clock_period_ns']):.3f}",
+            "lut": luts,
+            "ff": ffs,
+            "bram_tiles": f"{bram_tiles:.1f}",
+            "ramb18": ramb18,
+            "wns_ns": f"{wns:.3f}",
+            "critical_path_ns": f"{critical:.3f}",
+            "fmax_mhz": f"{fmax:.3f}",
+            "utilization_sha256": manifests[config.name]["reports"]["utilization.rpt"],
+            "timing_sha256": manifests[config.name]["reports"]["timing_summary.rpt"],
+        })
+    return baseline, rows
+
+
+def summarize(report_dir: Path) -> str:
+    baseline, records = collect_rows(report_dir)
+    rows = [
+        f"| {row['configuration']} | {row['lut']} | {row['ff']} | {float(str(row['bram_tiles'])):g} | "
+        f"{row['ramb18']} | {row['wns_ns']} | {row['critical_path_ns']} | {row['fmax_mhz']} |"
+        for row in records
+    ]
 
     lines = [
         "# Synthesis summary",
@@ -157,10 +205,36 @@ def summarize(report_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def csv_summary(report_dir: Path) -> str:
+    _, rows = collect_rows(report_dir)
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=SYNTHESIS_FIELDS, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
+
+
+def atomic_write(path: Path, contents: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="", dir=path.parent,
+            prefix=f".{path.name}.", delete=False,
+        ) as handle:
+            handle.write(contents)
+            temporary = Path(handle.name)
+        temporary.replace(path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report-dir", type=Path, default=Path(__file__).parent / "reports")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--csv", type=Path)
     return parser.parse_args(argv)
 
 
@@ -169,8 +243,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         output = summarize(args.report_dir.resolve())
         if args.output:
-            args.output.write_text(output, encoding="utf-8")
-        else:
+            atomic_write(args.output, output)
+        if args.csv:
+            atomic_write(args.csv, csv_summary(args.report_dir.resolve()))
+        if not args.output and not args.csv:
             print(output, end="")
     except (SummaryError, OSError, TypeError, ValueError) as exc:
         print(f"synthesis summary failed: {exc}", file=sys.stderr)

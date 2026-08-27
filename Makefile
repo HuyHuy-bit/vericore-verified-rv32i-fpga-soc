@@ -53,7 +53,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -176,6 +176,7 @@ bench: sim
 		DC_BYTES="$(DC_BYTES)" DC_BLOCK="$(DC_BLOCK)" DC_WAYS="$(DC_WAYS)" DC_WB="$(DC_WB)" \
 		BTB_IDX_BITS="$(BTB_IDX_BITS)" BTB_TAG_BITS="$(BTB_TAG_BITS)" \
 		GSHARE="$(GSHARE)" RAS_DEPTH="$(RAS_DEPTH)" \
+		RESULT_CSV="$(BENCH_CSV)" RESULT_CONFIG="$(BENCH_CONFIG)" \
 		./bench/run_bench.sh
 
 # Lint only — quick syntax/structure check, -Wall with a documented waiver file.
@@ -257,12 +258,23 @@ soak-lockstep: lockstep-sim
 	LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) ./tools/soak_lockstep.sh $(SEEDS)
 
 REPORT_DIR ?= syn/reports
-RTL_COMMIT ?= c0a95a3a4a33d3f5611f017cb9b8c454f1d13319
+RESULT_RUN_DIR ?= .portfolio-runs/current
+RTL_COMMIT ?= 3c7e84e392b345332d6acdd0ed899928dafb1058
 synth-matrix:
 	VIVADO="$(VIVADO)" python3 syn/run_synth.py --report-dir "$(REPORT_DIR)" --rtl-commit "$(RTL_COMMIT)"
 
 synth-summary:
 	python3 syn/summarize_reports.py --report-dir "$(REPORT_DIR)"
+
+results-check:
+	python3 -m unittest -v tools.test_results syn.test_synth_tools
+	python3 tools/results.py check
+
+results-synth:
+	python3 tools/results.py collect-synthesis --report-dir "$(REPORT_DIR)" --output "$(RESULT_RUN_DIR)"
+
+results-open:
+	python3 tools/results.py collect-open --run-dir "$(RESULT_RUN_DIR)" --output results
 
 clean:
 	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov* obj_dir_lockstep* coverage tests/*.hex tests/*.vcd cpu.vcd

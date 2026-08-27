@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import os
 from pathlib import Path
 import subprocess
@@ -272,6 +273,41 @@ class SynthToolTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("provenance mismatch", result.stderr)
+
+    def test_csv_summary_emits_four_strict_rows(self) -> None:
+        self.assertEqual(self.run_matrix().returncode, 0)
+        output = Path(self.tmp.name) / "synthesis.csv"
+        result = subprocess.run(
+            [sys.executable, str(SUMMARIZER), "--report-dir", str(self.reports), "--csv", str(output)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with output.open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 4)
+        self.assertEqual([row["configuration"] for row in rows], ["core", "icache", "dcache-wt", "dcache-wb"])
+        self.assertTrue(all(row["critical_path_ns"] == "13.280" for row in rows))
+        self.assertTrue(all(row["fmax_mhz"] == "75.301" for row in rows))
+        self.assertTrue(all(len(row["utilization_sha256"]) == 64 for row in rows))
+
+    def test_csv_failure_preserves_existing_output(self) -> None:
+        self.assertEqual(self.run_matrix().returncode, 0)
+        output = Path(self.tmp.name) / "synthesis.csv"
+        output.write_text("preserve me\n", encoding="utf-8")
+        report = self.reports / "core/utilization.rpt"
+        report.write_text(report.read_text(encoding="utf-8") + "tampered\n", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(SUMMARIZER), "--report-dir", str(self.reports), "--csv", str(output)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(output.read_text(encoding="utf-8"), "preserve me\n")
 
     def test_make_targets_run_fake_matrix_and_summary(self) -> None:
         for name in ("run_synth.py", "summarize_reports.py"):
