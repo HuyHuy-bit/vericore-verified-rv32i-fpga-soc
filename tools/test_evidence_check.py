@@ -493,6 +493,14 @@ class EvidenceContractTest(unittest.TestCase):
         result = self.run_checker()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_private_verification_cache_is_not_repository_source(self) -> None:
+        self.write(
+            ".verify-cache/upstream/tool.py",
+            f'PIN = "{self.SPIKE_SHA}"\n',
+        )
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_legacy_expected_count_symbol_is_rejected(self) -> None:
         path = self.repo / "tools/run_lockstep.sh"
         path.write_text(path.read_text().replace(

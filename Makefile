@@ -285,4 +285,4 @@ portfolio-render-check:
 	python3 tools/render_portfolio.py --check
 
 clean:
-	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_memtiming obj_dir_cov* obj_dir_lockstep* coverage tests/*.hex tests/*.vcd cpu.vcd
+	rm -rf obj_dir obj_dir_L* obj_dir_ic* obj_dir_unit_* obj_dir_memtiming obj_dir_cov* obj_dir_lockstep* coverage tests/*.hex tests/*.vcd cpu.vcd

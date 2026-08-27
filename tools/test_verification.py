@@ -106,6 +106,10 @@ class RunnerTest(unittest.TestCase):
 
 
 class ContainerCommandTest(unittest.TestCase):
+    def test_make_clean_removes_unit_build_directories(self):
+        source = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("obj_dir_unit_*", source)
+
     def test_build_uses_every_manifest_value_and_selected_target(self):
         command = build_image_command(ROOT, "demo")
         self.assertEqual(command[:3], ("docker", "build", "--target"))

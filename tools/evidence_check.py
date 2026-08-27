@@ -434,6 +434,8 @@ def executable_sources(root: Path) -> Iterable[Path]:
     allowed_suffixes = {".py", ".sh", ".yml", ".yaml"}
     excluded_prefixes = (
         Path(".git"),
+        Path(".verify-cache"),
+        Path(".portfolio-runs"),
         Path(".superpowers"),
         Path(".claude/worktrees"),
         Path("docs/superpowers"),

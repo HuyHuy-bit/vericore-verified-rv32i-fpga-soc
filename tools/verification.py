@@ -233,7 +233,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.mode == "run":
             if args.inside_container == "1":
                 status = run_commands(
-                    (Command("prepare-references", ("python3", "tools/prepare_references.py"), 7200),),
+                    (
+                        Command("clean-workspace", ("make", "clean"), 300),
+                        Command("prepare-references", ("python3", "tools/prepare_references.py"), 7200),
+                    ),
                     root,
                     {},
                 )
