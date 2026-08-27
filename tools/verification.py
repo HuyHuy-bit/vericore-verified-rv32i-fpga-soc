@@ -12,8 +12,10 @@ import sys
 from typing import Callable, Mapping, Sequence
 
 if __package__:
+    from .results import ResultError, write_verification_receipt
     from .tool_environment import TOOL_KEYS, load_manifest, validate_manifest
 else:
+    from results import ResultError, write_verification_receipt
     from tool_environment import TOOL_KEYS, load_manifest, validate_manifest
 
 
@@ -190,13 +192,14 @@ def docker_run_command(
     target: str = "verify",
     uid: int | None = None,
     gid: int | None = None,
+    receipt: Path | None = None,
 ) -> tuple[str, ...]:
     commands_for(profile, root)
     values = load_manifest(root / "tools" / "tool_versions.env")
     cache = root.resolve() / ".verify-cache"
     user_id = os.getuid() if uid is None else uid
     group_id = os.getgid() if gid is None else gid
-    return (
+    command = (
         "docker", "run", "--rm",
         "--env", f"HOST_UID={user_id}",
         "--env", f"HOST_GID={group_id}",
@@ -211,6 +214,9 @@ def docker_run_command(
         "--profile", profile,
         "--inside-container", "1",
     )
+    if receipt is not None:
+        command += ("--receipt", str(receipt))
+    return command
 
 
 def invoke(command: Sequence[str], root: Path, timeout: int) -> int:
@@ -223,6 +229,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--profile", default="full")
     parser.add_argument("--target", choices=("verify", "demo"), default="verify")
     parser.add_argument("--inside-container", choices=("0", "1"), default="0")
+    parser.add_argument("--receipt", type=Path)
     return parser.parse_args(argv)
 
 
@@ -231,6 +238,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     try:
         if args.mode == "run":
+            if args.receipt is not None and args.profile != "full":
+                raise VerificationError("verification receipts require the full profile")
+            receipt = args.receipt
+            if receipt is not None and not receipt.is_absolute():
+                receipt = root / receipt
+            if receipt is not None:
+                receipt.unlink(missing_ok=True)
             if args.inside_container == "1":
                 status = run_commands(
                     (
@@ -242,15 +256,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 if status != 0:
                     return status
-            return run_commands(commands_for(args.profile, root), root, {})
+            status = run_commands(commands_for(args.profile, root), root, {})
+            if status == 0 and receipt is not None:
+                write_verification_receipt(root, receipt)
+                print(f"wrote verification receipt: {receipt}")
+            return status
+        if args.receipt is not None and args.mode == "image":
+            raise VerificationError("image builds do not produce verification receipts")
         build = build_image_command(root, args.target)
         if invoke(build, root, 7200) != 0:
             return 1
         if args.mode == "image":
             return 0
         (root / ".verify-cache").mkdir(exist_ok=True)
-        return invoke(docker_run_command(root, args.profile, args.target), root, 86400)
-    except (OSError, VerificationError, ValueError) as exc:
+        return invoke(
+            docker_run_command(root, args.profile, args.target, receipt=args.receipt),
+            root,
+            86400,
+        )
+    except (OSError, ResultError, VerificationError, ValueError) as exc:
         print(f"verification failed: {exc}", file=sys.stderr)
         return 1
 

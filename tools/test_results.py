@@ -9,14 +9,17 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from tools.results import (
     BENCHMARK_FIELDS,
     SYNTHESIS_FIELDS,
     ResultError,
     collect_open,
+    coverage_counts,
     load_result_set,
     validate_result_set,
+    write_verification_receipt,
 )
 from syn.summarize_reports import SYNTHESIS_FIELDS as SUMMARY_SYNTHESIS_FIELDS
 
@@ -215,6 +218,7 @@ class ResultSetTest(unittest.TestCase):
             "rtl_commit": SHA_B,
             "container": {
                 "image": "ghcr.io/example/verify",
+                "digest": "sha256:" + "f" * 64,
                 "base": "ubuntu:24.04@sha256:" + "c" * 64,
                 "revision": 1,
             },
@@ -365,6 +369,78 @@ class ResultSetTest(unittest.TestCase):
             collect_open(self.results, output, SHA_A)
         self.assertEqual((output / "manifest.json").read_bytes(), previous)
         self.assertEqual(validate_result_set(output, self.checkout), [])
+
+
+class VerificationReceiptTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-receipt-")
+        self.checkout = Path(self.tmp.name)
+        for name in ("coverage", "rtl", "tools", "unit"):
+            (self.checkout / name).mkdir()
+        (self.checkout / "tools/reference_versions.env").write_text(
+            f"ARCH_TEST_SHA={SHA_A}\nARCH_TEST_EXPECTED="
+            + "".join(("3", "8")) + f"\nSPIKE_SHA={SHA_B}\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "unit/control_tb.sv").write_text(
+            '$display("PASS control: 2120 vectors");\n', encoding="utf-8"
+        )
+        (self.checkout / "unit/hazard_detect_tb.sv").write_text(
+            '$display("PASS hazard: 262144 vectors");\n', encoding="utf-8"
+        )
+        (self.checkout / "tools/test_harness.py").write_text(
+            "class Tests:\n    def test_one(self): pass\n    def test_two(self): pass\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "rtl/checks.sv").write_text(
+            "a: assert property (@(posedge clk) value);\n"
+            "always_comb assert (value);\n",
+            encoding="utf-8",
+        )
+        records = []
+        for category in ("line", "branch", "expr", "toggle", "user"):
+            records.append(
+                "C '" + chr(1) + "t" + chr(2) + category
+                + chr(1) + "h" + chr(2) + "TOP.point' 1"
+            )
+        (self.checkout / "coverage/merged.dat").write_text(
+            "\n".join(records) + "\n", encoding="utf-8"
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    @mock.patch("tools.results.git_text", side_effect=(SHA_A, SHA_B))
+    def test_complete_profile_writes_atomic_receipt(self, git: mock.Mock) -> None:
+        output = self.checkout / "run/verification.json"
+        write_verification_receipt(self.checkout, output)
+        value = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(value["status"], "complete")
+        self.assertEqual(value["tooling_commit"], SHA_A)
+        self.assertEqual(value["rtl_commit"], SHA_B)
+        self.assertEqual(value["harness_tests"], 2)
+        self.assertEqual(value["assertions"], {"concurrent": 1, "immediate": 1})
+        self.assertEqual(value["coverage"]["user"], {"hit": 1, "total": 1})
+        self.assertEqual(git.call_count, 2)
+        self.assertFalse(output.with_name(".verification.json.tmp").exists())
+
+    def test_missing_coverage_preserves_existing_receipt(self) -> None:
+        output = self.checkout / "verification.json"
+        output.write_text("previous\n", encoding="utf-8")
+        (self.checkout / "coverage/merged.dat").unlink()
+        with self.assertRaisesRegex(ResultError, "coverage result is missing"):
+            write_verification_receipt(self.checkout, output)
+        self.assertEqual(output.read_text(encoding="utf-8"), "previous\n")
+
+    def test_incomplete_coverage_is_rejected(self) -> None:
+        path = self.checkout / "coverage/merged.dat"
+        path.write_text(
+            "C '" + chr(1) + "t" + chr(2) + "user"
+            + chr(1) + "h" + chr(2) + "TOP.point' 0\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ResultError, "every required category"):
+            coverage_counts(path)
 
 
 if __name__ == "__main__":

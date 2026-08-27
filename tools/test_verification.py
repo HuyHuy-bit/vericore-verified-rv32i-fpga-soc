@@ -134,6 +134,16 @@ class ContainerCommandTest(unittest.TestCase):
         self.assertIn("REFERENCE_CACHE=/opt/rv32i-cache", command)
         self.assertEqual(command[-4:], ("--profile", "fast", "--inside-container", "1"))
 
+    def test_container_forwards_full_profile_receipt(self):
+        command = docker_run_command(
+            ROOT, "full", "verify", uid=123, gid=456,
+            receipt=Path(".portfolio-runs/current/verification.json"),
+        )
+        self.assertEqual(
+            command[-2:],
+            ("--receipt", ".portfolio-runs/current/verification.json"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

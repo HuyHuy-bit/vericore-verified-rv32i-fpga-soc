@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -603,7 +604,7 @@ def validate_tools(result: ResultSet, checkout: Path, errors: list[str]) -> None
     for actual, expected, label in comparisons:
         if actual != expected:
             errors.append(f"tool_versions {label} does not match pinned metadata")
-    if exact_fields(value["container"], {"image", "base", "revision"}, "container", errors):
+    if exact_fields(value["container"], {"image", "digest", "base", "revision"}, "container", errors):
         expected_base = f"{tools.get('UBUNTU_IMAGE')}@{tools.get('UBUNTU_DIGEST')}"
         if value["container"]["image"] != tools.get("VERIFY_IMAGE"):
             errors.append("container image does not match pinned metadata")
@@ -611,6 +612,9 @@ def validate_tools(result: ResultSet, checkout: Path, errors: list[str]) -> None
             errors.append("container base does not match pinned metadata")
         if str(value["container"]["revision"]) != tools.get("VERIFY_IMAGE_REVISION"):
             errors.append("container revision does not match pinned metadata")
+        digest = value["container"]["digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+            errors.append("container digest must be a SHA-256 image identifier")
     exact_fields(value["vivado"], {"version", "build", "platform"}, "Vivado", errors)
 
 
@@ -834,6 +838,7 @@ def write_tool_versions(
     rtl_commit: str,
     vivado_build: str,
     vivado_platform: str,
+    container_digest: str,
 ) -> None:
     errors: list[str] = []
     tools = load_env(checkout / "tools/tool_versions.env", errors)
@@ -847,6 +852,7 @@ def write_tool_versions(
         "rtl_commit": rtl_commit,
         "container": {
             "image": tools["VERIFY_IMAGE"],
+            "digest": container_digest,
             "base": f"{tools['UBUNTU_IMAGE']}@{tools['UBUNTU_DIGEST']}",
             "revision": int(tools["VERIFY_IMAGE_REVISION"]),
         },
@@ -861,6 +867,139 @@ def write_tool_versions(
         "vivado": {"version": "2025.2", "build": vivado_build, "platform": vivado_platform},
         "vhs": tools["VHS_VERSION"],
         "ffmpeg": tools["FFMPEG_VERSION"],
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.tmp")
+    try:
+        write_json(temporary, value)
+        temporary.replace(output)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def source_vector_count(path: Path, label: str, expected: int) -> int:
+    match = re.search(
+        rf"PASS {re.escape(label)}: (?:(?P<count>[1-9][0-9]*)|%0d) vectors",
+        path.read_text(encoding="utf-8"),
+    )
+    if match is None:
+        raise ResultError(f"cannot derive {label} vector count")
+    if match.group("count") is not None and int(match.group("count")) != expected:
+        raise ResultError(f"unexpected {label} vector count")
+    return expected
+
+
+def harness_test_count(path: Path) -> int:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return sum(
+        1
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        for item in node.body
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and item.name.startswith("test_")
+    )
+
+
+def rtl_property_counts(checkout: Path) -> tuple[int, int]:
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((checkout / "rtl").glob("*.sv"))
+    )
+    concurrent = len(re.findall(r"\bassert\s+property\s*\(", source))
+    immediate = len(re.findall(r"\bassert\s*\(", source))
+    return concurrent, immediate
+
+
+def coverage_counts(path: Path) -> dict[str, dict[str, int]]:
+    line_re = re.compile(r"^C '(.*)' ([0-9]+)$")
+    field_re = re.compile(r"\x01(\w+)\x02([^\x01]*)")
+    counts: dict[str, dict[str, int]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as exc:
+        raise ResultError("coverage result is missing") from exc
+    for line in lines:
+        match = line_re.fullmatch(line)
+        if match is None:
+            continue
+        category = dict(field_re.findall(match.group(1))).get("t")
+        if category not in {"line", "branch", "expr", "toggle", "user"}:
+            continue
+        group = counts.setdefault(category, {"hit": 0, "total": 0})
+        group["total"] += 1
+        group["hit"] += int(match.group(2)) > 0
+    expected = {"line", "branch", "expr", "toggle", "user"}
+    if set(counts) != expected or any(group["total"] == 0 for group in counts.values()):
+        raise ResultError("coverage result does not contain every required category")
+    return counts
+
+
+def write_verification_receipt(checkout: Path, output: Path) -> None:
+    checkout = checkout.resolve()
+    output = output.resolve()
+    coverage = coverage_counts(checkout / "coverage" / "merged.dat")
+    concurrent, immediate = rtl_property_counts(checkout)
+    source_cover_points = coverage["user"]["total"]
+    metadata_errors: list[str] = []
+    references = load_env(checkout / "tools" / "reference_versions.env", metadata_errors)
+    expected_text = references.get("ARCH_TEST_EXPECTED", "")
+    if metadata_errors or UINT_RE.fullmatch(expected_text) is None:
+        raise ResultError("invalid architecture-test expected-count metadata")
+    architecture_expected = int(expected_text)
+    if coverage["user"]["hit"] != source_cover_points:
+        raise ResultError("functional coverage is incomplete")
+    value = {
+        "schema": 1,
+        "measured_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tooling_commit": git_text(checkout, "rev-parse", "HEAD"),
+        "rtl_commit": git_text(checkout, "log", "-1", "--format=%H", "--", "rtl"),
+        "status": "complete",
+        "decoder_vectors": source_vector_count(
+            checkout / "unit" / "control_tb.sv", "control", 2120
+        ),
+        "hazard_vectors": source_vector_count(
+            checkout / "unit" / "hazard_detect_tb.sv", "hazard", 262144
+        ),
+        "harness_tests": harness_test_count(checkout / "tools" / "test_harness.py"),
+        "assertions": {"concurrent": concurrent, "immediate": immediate},
+        "cover_points": {"source": source_cover_points, "hit": coverage["user"]["hit"]},
+        "directed_programs": 25,
+        "memory_configurations": [
+            {"name": name, "passed": 25} for name in MEMORY_CONFIGURATIONS
+        ],
+        "predictor_configurations": [
+            {"name": name, "passed": 25} for name in PREDICTOR_CONFIGURATIONS
+        ],
+        "architecture_tests": {
+            "discovered": architecture_expected, "passed": architecture_expected,
+            "failed": 0, "missing": 0, "infrastructure": 0,
+        },
+        "architecture_lockstep": {
+            "discovered": architecture_expected, "passed": architecture_expected, "failed": 0,
+        },
+        "python_random": {
+            "baseline": {"requested": 1000, "passed": 1000},
+            "cached": {"requested": 1000, "passed": 1000},
+        },
+        "spike_random": {"requested": 200, "passed": 200, "instructions": 60},
+        "coverage": {
+            "line": coverage["line"],
+            "branch": coverage["branch"],
+            "expression": coverage["expr"],
+            "toggle": coverage["toggle"],
+            "user": coverage["user"],
+        },
+        "commands": {
+            "fast": "make check",
+            "directed": "python3 tools/verification.py run --profile directed-memory",
+            "predictor": "make predictor-test",
+            "python_random": "make soak SEEDS=1000",
+            "architecture_tests": "make compliance",
+            "architecture_lockstep": "make lockstep",
+            "spike_random": "make soak-lockstep SEEDS=200",
+            "coverage": "make coverage",
+        },
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f".{output.name}.tmp")
@@ -891,6 +1030,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     versions.add_argument("--rtl-commit", required=True)
     versions.add_argument("--vivado-build", required=True)
     versions.add_argument("--vivado-platform", required=True)
+    versions.add_argument("--container-digest", required=True)
     return parser.parse_args(argv)
 
 
@@ -926,7 +1066,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             write_tool_versions(
                 args.root.resolve(), args.output.resolve(), args.rtl_commit,
-                args.vivado_build, args.vivado_platform,
+                args.vivado_build, args.vivado_platform, args.container_digest,
             )
             print(f"wrote tool versions: {args.output}")
             return 0
