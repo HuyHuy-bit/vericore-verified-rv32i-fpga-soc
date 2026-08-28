@@ -401,17 +401,17 @@ class VerificationReceiptTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-receipt-")
         self.checkout = Path(self.tmp.name)
-        for name in ("coverage", "rtl", "tools", "unit"):
-            (self.checkout / name).mkdir()
+        for name in ("coverage", "rtl", "tools", "sim/unit"):
+            (self.checkout / name).mkdir(parents=True)
         (self.checkout / "tools/reference_versions.env").write_text(
             f"ARCH_TEST_SHA={SHA_A}\nARCH_TEST_EXPECTED="
             + "".join(("3", "8")) + f"\nSPIKE_SHA={SHA_B}\n",
             encoding="utf-8",
         )
-        (self.checkout / "unit/control_tb.sv").write_text(
+        (self.checkout / "sim/unit/control_tb.sv").write_text(
             '$display("PASS control: 2120 vectors");\n', encoding="utf-8"
         )
-        (self.checkout / "unit/hazard_detect_tb.sv").write_text(
+        (self.checkout / "sim/unit/hazard_detect_tb.sv").write_text(
             '$display("PASS hazard: 262144 vectors");\n', encoding="utf-8"
         )
         (self.checkout / "tools/test_harness.py").write_text(

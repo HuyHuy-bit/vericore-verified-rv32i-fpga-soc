@@ -86,7 +86,7 @@ if [ -n "${RESULT_CSV:-}" ]; then
         *) die "RESULT_CONFIG must name a headline configuration" ;;
     esac
     TOOLING_COMMIT="${TOOLING_COMMIT:-$(git -C "$ROOT" rev-parse HEAD)}"
-    RTL_COMMIT="${RTL_COMMIT:-$(git -C "$ROOT" log -1 --format=%H -- rtl cpu_tb.cpp)}"
+    RTL_COMMIT="${RTL_COMMIT:-$(git -C "$ROOT" log -1 --format=%H -- rtl sim/cpu_tb.cpp)}"
     [[ "$TOOLING_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "invalid TOOLING_COMMIT"
     [[ "$RTL_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "invalid RTL_COMMIT"
     result_parent=$(dirname "$RESULT_CSV")
@@ -113,9 +113,12 @@ else
     # Builds are cached per configuration, so an RTL edit that doesn't change
     # the configuration would otherwise be measured with a stale binary and
     # report the old numbers as if they were new ones.
-    newest=$(ls -t "$ROOT"/rtl/*.sv "$ROOT/cpu_tb.cpp" | head -1)
-    if [ ! -x "$SIM" ] || [ "$newest" -nt "$SIM" ]; then
+    if [ ! -x "$SIM" ] \
+        || [ -n "$(find "$ROOT/rtl" -type f -name '*.sv' -newer "$SIM" -print -quit)" ] \
+        || [ "$ROOT/sim/cpu_tb.cpp" -nt "$SIM" ]; then
         echo "building simulator: latency=$LATENCY ic=${IC_BYTES}B dc=${DC_BYTES}B ..." >&2
+        mapfile -t rtl_sources < <(find "$ROOT/rtl" -type f -name '*.sv' \
+            ! -path "$ROOT/rtl/rv32i_pkg.sv" -print | sort)
         verilator --cc --exe --build --trace --assert --timing -j 0 --top-module cpu \
             -GIMEM_LATENCY="$LATENCY" -GDMEM_LATENCY="$LATENCY" \
             -GICACHE_BYTES="$IC_BYTES" -GICACHE_BLOCK_WORDS="$IC_BLOCK" \
@@ -125,7 +128,7 @@ else
             -GBTB_IDX_BITS="$BTB_IDX_BITS" -GBTB_TAG_BITS="$BTB_TAG_BITS" \
             -GGSHARE="$GSHARE" -GRAS_DEPTH="$RAS_DEPTH" \
             --Mdir "$OBJ" \
-            "$ROOT"/rtl/rv32i_pkg.sv $(ls "$ROOT"/rtl/*.sv | grep -v rv32i_pkg.sv) "$ROOT/cpu_tb.cpp" \
+            "$ROOT/rtl/rv32i_pkg.sv" "${rtl_sources[@]}" "$ROOT/sim/cpu_tb.cpp" \
             > "$WORK/build.log" 2>&1 || { cat "$WORK/build.log" >&2; exit 1; }
     fi
 fi

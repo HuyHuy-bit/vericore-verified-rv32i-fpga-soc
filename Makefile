@@ -1,13 +1,15 @@
 # ---- RV32I 5-stage pipelined CPU: Verilator build + multi-test suite ----
 TOP      = cpu
-TB       = cpu_tb.cpp
+TB       = sim/cpu_tb.cpp
 
 CPU_SRCS = rtl/rv32i_pkg.sv \
-           rtl/cpu.sv rtl/frontend.sv rtl/backend.sv rtl/pc.sv rtl/instr_mem.sv rtl/reg_file.sv rtl/imm_gen.sv \
-           rtl/alu.sv rtl/control.sv rtl/data_mem.sv rtl/branch_unit.sv \
-           rtl/if_id_reg.sv rtl/id_ex_reg.sv rtl/ex_mem_reg.sv rtl/mem_wb_reg.sv \
-           rtl/forwarding_unit.sv rtl/hazard_detect.sv rtl/branch_predictor.sv rtl/ras.sv rtl/csr.sv \
-           rtl/mem_timing.sv rtl/icache.sv rtl/lsu.sv rtl/dcache.sv rtl/perf_counters.sv
+           rtl/core/cpu.sv rtl/core/frontend.sv rtl/core/backend.sv rtl/core/pc.sv \
+           rtl/memory/instr_mem.sv rtl/core/reg_file.sv rtl/core/imm_gen.sv \
+           rtl/core/alu.sv rtl/core/control.sv rtl/memory/data_mem.sv rtl/core/branch_unit.sv \
+           rtl/core/if_id_reg.sv rtl/core/id_ex_reg.sv rtl/core/ex_mem_reg.sv rtl/core/mem_wb_reg.sv \
+           rtl/core/forwarding_unit.sv rtl/core/hazard_detect.sv rtl/core/branch_predictor.sv \
+           rtl/core/ras.sv rtl/core/csr.sv rtl/memory/mem_timing.sv rtl/memory/icache.sv \
+           rtl/memory/lsu.sv rtl/memory/dcache.sv rtl/core/perf_counters.sv
 
 # Cache/latency configuration. Defaults match the plain no-cache build so
 # `make all` with no arguments behaves exactly as before.
@@ -86,15 +88,15 @@ tests/%.hex: tests/%.s tools/asm.py
 memtiming:
 	@python3 tools/build_environment.py prepare --build-dir obj_dir_memtiming --identity "$(BUILD_ENV_ID)"
 	@verilator --cc --exe --build -j 0 --top-module mem_timing -GLATENCY=10 \
-	    --Mdir obj_dir_memtiming rtl/rv32i_pkg.sv rtl/mem_timing.sv tb/mem_timing_tb.cpp > /dev/null
+	    --Mdir obj_dir_memtiming rtl/rv32i_pkg.sv rtl/memory/mem_timing.sv sim/mem_timing_tb.cpp > /dev/null
 	@./obj_dir_memtiming/Vmem_timing
 
 # Dependency-free SystemVerilog unit checks, each isolated in an ignored
 # obj_dir_unit_* build directory by tools/run_unit.sh.
 unit:
-	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/control.sv unit/control_tb.sv
-	@tools/run_unit.sh hazard_detect_tb rtl/hazard_detect.sv unit/hazard_detect_tb.sv
-	@tools/run_unit.sh dcache_counter_tb rtl/rv32i_pkg.sv rtl/dcache.sv unit/dcache_counter_tb.sv
+	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/core/control.sv sim/unit/control_tb.sv
+	@tools/run_unit.sh hazard_detect_tb rtl/core/hazard_detect.sv sim/unit/hazard_detect_tb.sv
+	@tools/run_unit.sh dcache_counter_tb rtl/rv32i_pkg.sv rtl/memory/dcache.sv sim/unit/dcache_counter_tb.sv
 
 # Run every test and print a summary.
 test: sim assemble memtiming

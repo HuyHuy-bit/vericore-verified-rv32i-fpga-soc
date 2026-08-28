@@ -23,7 +23,8 @@ file mkdir $outdir
 
 create_project -in_memory -part $part
 
-read_verilog -sv [glob rtl/*.sv]
+read_verilog -sv rtl/rv32i_pkg.sv
+read_verilog -sv [concat [glob rtl/core/*.sv] [glob rtl/memory/*.sv]]
 read_xdc cpu.xdc
 
 synth_design -mode out_of_context -top cpu -part $part \

@@ -5,14 +5,13 @@ on:
   push:
     paths:
       - 'rtl/**'
-      - 'cpu_tb.cpp'
+      - 'sim/**'
       - 'Makefile'
       - 'bench/**'
       - 'compliance/**'
       - 'containers/**'
       - '.devcontainer/**'
       - 'tools/**'
-      - 'unit/**'
       - 'tests/**'
       - 'results/**'
       - 'README.md'
@@ -21,14 +20,13 @@ on:
   pull_request:
     paths:
       - 'rtl/**'
-      - 'cpu_tb.cpp'
+      - 'sim/**'
       - 'Makefile'
       - 'bench/**'
       - 'compliance/**'
       - 'containers/**'
       - '.devcontainer/**'
       - 'tools/**'
-      - 'unit/**'
       - 'tests/**'
       - 'results/**'
       - 'README.md'

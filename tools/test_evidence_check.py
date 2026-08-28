@@ -51,14 +51,13 @@ class EvidenceContractTest(unittest.TestCase):
     SPIKE_SHA = "b" * 40
     REQUIRED_PATHS = (
         "rtl/**",
-        "cpu_tb.cpp",
+        "sim/**",
         "Makefile",
         "bench/**",
         "compliance/**",
         "containers/**",
         ".devcontainer/**",
         "tools/**",
-        "unit/**",
         "tests/**",
         "results/**",
     )
@@ -630,9 +629,9 @@ class EvidenceContractTest(unittest.TestCase):
 
     def test_missing_required_path_is_rejected_for_each_filtered_event(self) -> None:
         workflow = self.reference_workflow("lockstep").replace(
-            "      - 'cpu_tb.cpp'\n", "", 1)
+            "      - 'sim/**'\n", "", 1)
         self.write_workflow("lockstep.yml", workflow)
-        self.assert_contract_failure("push.paths missing cpu_tb.cpp")
+        self.assert_contract_failure("push.paths missing sim/**")
 
     def test_wrong_directed_matrix_is_rejected(self) -> None:
         workflow = self.rtl_workflow().replace(

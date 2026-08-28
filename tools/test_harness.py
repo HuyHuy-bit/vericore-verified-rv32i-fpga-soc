@@ -396,7 +396,8 @@ class CoverageTargetTest(unittest.TestCase):
         self.repo = self.work / "repo"
         self.repo.mkdir()
         shutil.copy2(ROOT / "Makefile", self.repo / "Makefile")
-        shutil.copy2(ROOT / "cpu_tb.cpp", self.repo / "cpu_tb.cpp")
+        (self.repo / "sim").mkdir()
+        shutil.copy2(ROOT / "sim/cpu_tb.cpp", self.repo / "sim/cpu_tb.cpp")
         shutil.copytree(ROOT / "rtl", self.repo / "rtl")
         shutil.copytree(ROOT / "tests", self.repo / "tests")
         shutil.copytree(ROOT / "tools", self.repo / "tools")
@@ -841,8 +842,10 @@ class BenchmarkRunnerTest(unittest.TestCase):
             (self.repo / "bench" / f"{kernel}.c").write_text("placeholder\n")
         (self.repo / "compliance/link/rv32i-pipeline.ld").write_text("SECTIONS {}\n")
         (self.repo / "compliance/elf2hex.py").write_text("# fake converter\n")
-        (self.repo / "cpu_tb.cpp").write_text("// placeholder\n")
-        (self.repo / "rtl/cpu.sv").write_text("// placeholder\n")
+        (self.repo / "sim").mkdir()
+        (self.repo / "sim/cpu_tb.cpp").write_text("// placeholder\n")
+        (self.repo / "rtl/core").mkdir()
+        (self.repo / "rtl/core/cpu.sv").write_text("// placeholder\n")
         self.bin_dir = self.work / "bin"
         self.bin_dir.mkdir()
         self.work_log = self.work / "target-work-paths"

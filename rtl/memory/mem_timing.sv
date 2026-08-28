@@ -12,7 +12,7 @@
 // fetching straight from memory issues independent accesses and pays full
 // price for every one.
 //
-// Timing contract (checked by tb/mem_timing_tb.cpp):
+// Timing contract (checked by sim/mem_timing_tb.cpp):
 //   a fresh access is !ready for exactly LATENCY-1 cycles, then ready
 //   a burst-sequential access is !ready for exactly 1 cycle, then ready
 //   an access to the address already served is ready immediately

@@ -53,14 +53,13 @@ COUNT_RE = re.compile(r"[1-9][0-9]*\Z")
 ASSIGNMENT_RE = re.compile(r"([A-Z][A-Z0-9_]*)=([^\s#]+)\Z")
 REQUIRED_PATHS = (
     "rtl/**",
-    "cpu_tb.cpp",
+    "sim/**",
     "Makefile",
     "bench/**",
     "compliance/**",
     "containers/**",
     ".devcontainer/**",
     "tools/**",
-    "unit/**",
     "tests/**",
     "results/**",
 )
@@ -1160,7 +1159,7 @@ def strip_sv_comments(source: str) -> str:
 def rtl_property_counts(root: Path) -> tuple[int, int, int]:
     source = "\n".join(
         strip_sv_comments(path.read_text(encoding="utf-8", errors="replace"))
-        for path in sorted((root / "rtl").glob("*.sv"))
+        for path in sorted((root / "rtl").rglob("*.sv"))
     )
     concurrent = len(re.findall(r"\bassert\s+property\s*\(", source))
     immediate = len(re.findall(r"\bassert\s*\(", source))

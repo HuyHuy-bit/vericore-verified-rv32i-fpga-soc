@@ -30,7 +30,7 @@ module reg_file (
                      : reg_array[rs2_addr];
 
     // Debug taps removed — the testbench reads all 32 registers directly via
-    // the simulator's hierarchical root (cpu_tb.cpp), so these ports were
+    // the simulator's hierarchical root (sim/cpu_tb.cpp), so these ports were
     // dead weight left over from the single-cycle predecessor.
     always_ff @(posedge clk) begin
         if (rst) begin

@@ -651,7 +651,7 @@ def validate_provenance(result: ResultSet, checkout: Path, errors: list[str]) ->
             if probe.returncode != 0:
                 errors.append(f"{label} commit does not exist in this checkout")
         if isinstance(rtl, str) and SHA_RE.fullmatch(rtl):
-            paths = [path for path in ("rtl", "cpu_tb.cpp") if (checkout / path).exists()]
+            paths = [path for path in ("rtl", "sim/cpu_tb.cpp") if (checkout / path).exists()]
             if paths:
                 diff = subprocess.run(
                     ["git", "-C", str(checkout), "diff", "--quiet", rtl, "--", *paths]
@@ -920,7 +920,7 @@ def harness_test_count(path: Path) -> int:
 
 def rtl_property_counts(checkout: Path) -> tuple[int, int]:
     source = "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted((checkout / "rtl").glob("*.sv"))
+        path.read_text(encoding="utf-8") for path in sorted((checkout / "rtl").rglob("*.sv"))
     )
     concurrent = len(re.findall(r"\bassert\s+property\s*\(", source))
     immediate = len(re.findall(r"\bassert\s*\(", source))
@@ -972,10 +972,10 @@ def write_verification_receipt(checkout: Path, output: Path) -> None:
         "rtl_commit": git_text(checkout, "log", "-1", "--format=%H", "--", "rtl"),
         "status": "complete",
         "decoder_vectors": source_vector_count(
-            checkout / "unit" / "control_tb.sv", "control", 2120
+            checkout / "sim" / "unit" / "control_tb.sv", "control", 2120
         ),
         "hazard_vectors": source_vector_count(
-            checkout / "unit" / "hazard_detect_tb.sv", "hazard", 262144
+            checkout / "sim" / "unit" / "hazard_detect_tb.sv", "hazard", 262144
         ),
         "harness_tests": harness_test_count(checkout / "tools" / "test_harness.py"),
         "assertions": {"concurrent": concurrent, "immediate": immediate},

@@ -1,4 +1,4 @@
-// mem_timing_tb.cpp - asserts the access-cost contract in rtl/mem_timing.sv.
+// mem_timing_tb.cpp - asserts the access-cost contract in rtl/memory/mem_timing.sv.
 //
 // Built with LATENCY=10. The LATENCY<=1 branch is `assign ready = 1'b1` and is
 // covered by the full CPU suite, which produces identical cycle counts with the

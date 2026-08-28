@@ -243,12 +243,14 @@ def create_stage(root: Path, parent: Path | None) -> tempfile.TemporaryDirectory
     stage = tempfile.TemporaryDirectory(prefix="rv32i-vivado-", dir=parent)
     destination = Path(stage.name)
     (destination / "rtl").mkdir()
-    rtl_files = sorted((root / "rtl").glob("*.sv"))
+    rtl_files = sorted((root / "rtl").rglob("*.sv"))
     if not rtl_files:
         stage.cleanup()
         raise SynthError("no RTL sources found")
     for source in rtl_files:
-        shutil.copy2(source, destination / "rtl" / source.name)
+        target = destination / source.relative_to(root)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     for name in ("build.tcl", "cpu.xdc", "blank_instr.hex", "blank_data.hex"):
         source = root / "syn" / name
         if not source.is_file():
