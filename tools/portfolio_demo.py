@@ -166,13 +166,14 @@ def sha256(path: Path) -> str:
 
 def write_media_manifest(root: Path) -> None:
     root = root.resolve()
+    media = root / "docs" / "media"
     names = ("portfolio-demo.tape", "portfolio-demo.txt", "portfolio-demo.gif")
     value = {
         "schema": 1,
-        "sha256": {name: sha256(root / "docs" / name) for name in names},
+        "sha256": {name: sha256(media / name) for name in names},
     }
     atomic_write(
-        root / "docs/portfolio-demo.json",
+        media / "portfolio-demo.json",
         json.dumps(value, indent=2, sort_keys=True) + "\n",
     )
 
@@ -243,11 +244,11 @@ def validate_media(root: Path) -> list[str]:
         result = load_result(root)
     except DemoError as exc:
         return [str(exc)]
-    docs = root / "docs"
-    transcript = docs / "portfolio-demo.txt"
-    tape = docs / "portfolio-demo.tape"
-    gif = docs / "portfolio-demo.gif"
-    manifest = docs / "portfolio-demo.json"
+    media = root / "docs" / "media"
+    transcript = media / "portfolio-demo.txt"
+    tape = media / "portfolio-demo.tape"
+    gif = media / "portfolio-demo.gif"
+    manifest = media / "portfolio-demo.json"
     try:
         if transcript.read_text(encoding="utf-8") != summary_text(result):
             errors.append("portfolio demo transcript is stale")
@@ -256,7 +257,7 @@ def validate_media(root: Path) -> list[str]:
     try:
         tape_source = tape.read_text(encoding="utf-8")
         tokens = (
-            "Output docs/portfolio-demo.gif",
+            "Output docs/media/portfolio-demo.gif",
             "Set Width 1280",
             "Set Height 720",
             'Type "python3 tools/portfolio_demo.py --live"',
@@ -288,13 +289,13 @@ def validate_media(root: Path) -> list[str]:
             errors.append("portfolio demo media manifest is incomplete")
         else:
             for name in names:
-                if value["sha256"][name] != sha256(docs / name):
+                if value["sha256"][name] != sha256(media / name):
                     errors.append(f"portfolio demo hash mismatch: {name}")
     except (FileNotFoundError, json.JSONDecodeError, OSError, KeyError, TypeError):
         errors.append("portfolio demo media manifest is invalid")
     try:
         readme = (root / "README.md").read_text(encoding="utf-8")
-        if readme.count("![Portfolio verification demo](docs/portfolio-demo.gif)") != 1:
+        if readme.count("![Portfolio verification demo](docs/media/portfolio-demo.gif)") != 1:
             errors.append("README must link the portfolio demo GIF exactly once")
     except FileNotFoundError:
         errors.append("README is missing")
@@ -324,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.write_media_manifest:
             write_media_manifest(root)
-            print("wrote docs/portfolio-demo.json")
+            print("wrote docs/media/portfolio-demo.json")
             return 0
         if args.check:
             errors = validate_media(root)
@@ -337,8 +338,8 @@ def main(argv: list[str] | None = None) -> int:
             status = run_demo(root, output, live=False)
             if status != 0:
                 return status
-            atomic_write(root / "docs/portfolio-demo.txt", output.getvalue())
-            print("wrote docs/portfolio-demo.txt")
+            atomic_write(root / "docs/media/portfolio-demo.txt", output.getvalue())
+            print("wrote docs/media/portfolio-demo.txt")
             return 0
         if args.live:
             return run_demo(root, sys.stdout, live=True)

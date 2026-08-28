@@ -93,4 +93,4 @@ Getting it working surfaced a non-obvious hazard worth recording: the two machin
 
 - **Trap/CSR/interrupt generation under random stimulus.** Control flow is covered now (`make soak-lockstep`); privileged sequences are not, and need the generator to model privilege state rather than just emit instructions.
 - **Formal.** The RVFI port makes a formal flow (e.g. riscv-formal) bindable, but none is set up.
-- **Timing closure.** Nothing here says whether the design meets timing; see the synthesis section of `docs/MICROARCHITECTURE.md`.
+- **Timing closure.** Nothing here says whether the design meets timing; see the synthesis section of `docs/architecture.md`.

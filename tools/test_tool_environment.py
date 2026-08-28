@@ -153,7 +153,7 @@ class ContainerContractTest(unittest.TestCase):
 
     def test_dockerignore_excludes_generated_artifacts(self):
         entries = set(self.text(".dockerignore").splitlines())
-        for entry in ("obj_dir*", "coverage/", "syn/reports/", "*.vcd", ".git/"):
+        for entry in ("obj_dir*", "coverage/", "synthesis/reports/", "*.vcd", ".git/"):
             self.assertIn(entry, entries)
 
     def test_every_manifest_key_has_an_executable_consumer(self):

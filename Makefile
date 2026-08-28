@@ -278,17 +278,17 @@ soak-lockstep: lockstep-sim
 	SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)" LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) \
 		./tools/soak_lockstep.sh $(SEEDS)
 
-REPORT_DIR ?= syn/reports
+REPORT_DIR ?= synthesis/reports
 RESULT_RUN_DIR ?= .portfolio-runs/current
 RTL_COMMIT ?= 3c7e84e392b345332d6acdd0ed899928dafb1058
 synth-matrix:
-	VIVADO="$(VIVADO)" python3 syn/run_synth.py --report-dir "$(REPORT_DIR)" --rtl-commit "$(RTL_COMMIT)"
+	VIVADO="$(VIVADO)" python3 synthesis/run_synth.py --report-dir "$(REPORT_DIR)" --rtl-commit "$(RTL_COMMIT)"
 
 synth-summary:
-	python3 syn/summarize_reports.py --report-dir "$(REPORT_DIR)"
+	python3 synthesis/summarize_reports.py --report-dir "$(REPORT_DIR)"
 
 results-check:
-	python3 -m unittest -v tools.test_results syn.test_synth_tools
+	python3 -m unittest -v tools.test_results synthesis.test_synth_tools
 	python3 tools/results.py check
 
 results-synth:
@@ -310,7 +310,7 @@ portfolio-demo:
 portfolio-demo-record:
 	python3 tools/prepare_references.py
 	python3 tools/portfolio_demo.py --write-transcript
-	vhs docs/portfolio-demo.tape
+	vhs docs/media/portfolio-demo.tape
 	python3 tools/portfolio_demo.py --write-media-manifest
 
 portfolio-gif:

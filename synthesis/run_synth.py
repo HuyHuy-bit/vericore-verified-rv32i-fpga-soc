@@ -252,7 +252,7 @@ def create_stage(root: Path, parent: Path | None) -> tempfile.TemporaryDirectory
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     for name in ("build.tcl", "cpu.xdc", "blank_instr.hex", "blank_data.hex"):
-        source = root / "syn" / name
+        source = root / "synthesis" / name
         if not source.is_file():
             stage.cleanup()
             raise SynthError(f"missing synthesis input: {source}")
@@ -388,18 +388,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     root = args.root.resolve()
-    report_dir = (args.report_dir or root / "syn/reports").resolve()
+    report_dir = (args.report_dir or root / "synthesis/reports").resolve()
     if args.timeout <= 0:
         print("synthesis failed: timeout must be positive", file=sys.stderr)
         return 1
     try:
-        validate_image(root / "syn/blank_instr.hex")
-        validate_image(root / "syn/blank_data.hex")
+        validate_image(root / "synthesis/blank_instr.hex")
+        validate_image(root / "synthesis/blank_data.hex")
         source_commit, rtl_commit = source_identity(root, args.rtl_commit)
         tool, stage_parent = discover_tool(dict(os.environ))
         measurement_date = datetime.now(timezone.utc).date().isoformat()
         report_dir.parent.mkdir(parents=True, exist_ok=True)
-        if report_dir in (Path("/"), root, root / "syn"):
+        if report_dir in (Path("/"), root, root / "synthesis"):
             raise SynthError(f"unsafe report destination: {report_dir}")
         output = Path(tempfile.mkdtemp(prefix=".synth-reports-", dir=report_dir.parent))
         try:

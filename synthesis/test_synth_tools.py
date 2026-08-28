@@ -11,12 +11,12 @@ import sys
 import tempfile
 import unittest
 
-from syn import run_synth
+from synthesis import run_synth
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "syn/run_synth.py"
-SUMMARIZER = ROOT / "syn/summarize_reports.py"
+RUNNER = ROOT / "synthesis/run_synth.py"
+SUMMARIZER = ROOT / "synthesis/summarize_reports.py"
 
 
 class SynthToolTest(unittest.TestCase):
@@ -24,17 +24,17 @@ class SynthToolTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-synth-tools-")
         self.repo = Path(self.tmp.name) / "repo"
         (self.repo / "rtl").mkdir(parents=True)
-        (self.repo / "syn").mkdir()
+        (self.repo / "synthesis").mkdir()
         (self.repo / "rtl/core.sv").write_text("module cpu; endmodule\n", encoding="utf-8")
-        (self.repo / "syn/build.tcl").write_text("puts build\n", encoding="utf-8")
-        (self.repo / "syn/cpu.xdc").write_text(
+        (self.repo / "synthesis/build.tcl").write_text("puts build\n", encoding="utf-8")
+        (self.repo / "synthesis/cpu.xdc").write_text(
             "create_clock -period 2.000 -name clk [get_ports clk]\n",
             encoding="utf-8",
         )
         image = "".join(f"{index:08x}\n" for index in range(512))
-        (self.repo / "syn/blank_instr.hex").write_text(image, encoding="utf-8")
+        (self.repo / "synthesis/blank_instr.hex").write_text(image, encoding="utf-8")
         data_image = "".join(f"{index:08x}\n" for index in reversed(range(512)))
-        (self.repo / "syn/blank_data.hex").write_text(data_image, encoding="utf-8")
+        (self.repo / "synthesis/blank_data.hex").write_text(data_image, encoding="utf-8")
         self.fake = Path(self.tmp.name) / "fake-vivado"
         self.fake.write_text(
             "#!/usr/bin/env bash\n"
@@ -180,7 +180,7 @@ class SynthToolTest(unittest.TestCase):
 
     def test_degenerate_memory_image_is_rejected(self) -> None:
         zeros = "00000000\n" * 512
-        (self.repo / "syn/blank_instr.hex").write_text(zeros, encoding="utf-8")
+        (self.repo / "synthesis/blank_instr.hex").write_text(zeros, encoding="utf-8")
         self.assert_matrix_failure("memory image must contain varied data")
 
     def test_dirty_source_checkout_is_rejected(self) -> None:
@@ -311,11 +311,11 @@ class SynthToolTest(unittest.TestCase):
 
     def test_make_targets_run_fake_matrix_and_summary(self) -> None:
         for name in ("run_synth.py", "summarize_reports.py"):
-            (self.repo / "syn" / name).write_text(
-                (ROOT / "syn" / name).read_text(encoding="utf-8"),
+            (self.repo / "synthesis" / name).write_text(
+                (ROOT / "synthesis" / name).read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
-        subprocess.run(["git", "add", "syn"], cwd=self.repo, check=True)
+        subprocess.run(["git", "add", "synthesis"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "add synthesis tools"], cwd=self.repo, check=True)
         matrix = subprocess.run(
             [

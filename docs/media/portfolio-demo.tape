@@ -1,4 +1,4 @@
-Output docs/portfolio-demo.gif
+Output docs/media/portfolio-demo.gif
 
 Set Shell "bash"
 Set FontFamily "DejaVu Sans Mono"

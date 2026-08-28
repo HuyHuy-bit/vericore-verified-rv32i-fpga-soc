@@ -370,18 +370,18 @@ class EvidenceContractTest(unittest.TestCase):
         block = self.fact_block()
         for relative in (
             "README.md",
-            "docs/MICROARCHITECTURE.md",
-            "docs/VERIFICATION_PLAN.md",
-            "docs/EVIDENCE.md",
+            "docs/architecture.md",
+            "docs/verification.md",
+            "docs/evidence.md",
         ):
             self.write(relative, f"# Evidence fixture\n\n{block}")
 
     def replace_all_fact_values(self, old: str, new: str) -> None:
         for relative in (
             "README.md",
-            "docs/MICROARCHITECTURE.md",
-            "docs/VERIFICATION_PLAN.md",
-            "docs/EVIDENCE.md",
+            "docs/architecture.md",
+            "docs/verification.md",
+            "docs/evidence.md",
         ):
             path = self.repo / relative
             path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
@@ -1130,7 +1130,7 @@ class EvidenceContractTest(unittest.TestCase):
 
     def test_duplicate_document_fact_is_rejected(self) -> None:
         self.write_evidence_tree()
-        path = self.repo / "docs/EVIDENCE.md"
+        path = self.repo / "docs/evidence.md"
         path.write_text(
             path.read_text(encoding="utf-8").replace(
                 "EVIDENCE_FACT DIRECTED_TESTS=2",

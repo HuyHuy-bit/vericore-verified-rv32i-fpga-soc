@@ -2,7 +2,7 @@
 """A minimal RV32I functional model: straight-line ALU + load/store subset.
 
 Not a golden reference for the whole ISA (no branches/jumps/traps/CSRs) —
-building that is what Spike is for (see docs/VERIFICATION_PLAN.md; blocked in
+building that is what Spike is for (see docs/verification.md; blocked in
 this sandbox on installing Spike's build deps). This covers exactly the
 instruction subset tools/rand_gen.py emits, which is enough to catch
 forwarding/hazard/LSU bugs via random final-register-state comparison

@@ -9,7 +9,7 @@
 # no way to know it's conditioned on b1, so a bimodal predictor and a gshare
 # predictor see genuinely different information here. The measured
 # accuracy/CPI difference (GSHARE=0 vs. 1 on this exact program) is in
-# docs/MICROARCHITECTURE.md; this test itself only checks correctness
+# docs/architecture.md; this test itself only checks correctness
 # (final register state) under the default GSHARE=0 build.
     addi x14, x0, 40       # loop count
     addi x6, x0, 0

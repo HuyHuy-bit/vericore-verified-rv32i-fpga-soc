@@ -1,6 +1,6 @@
 # RV32I Pipelined CPU
 
-A 5-stage pipelined `RV32I_Zicsr_Zifencei` core in SystemVerilog — forwarding, branch prediction, precise exceptions, and a parameterised I/D cache hierarchy. Its directed, architecture-signature, and retirement-lockstep flows are independently gated, with current measurement provenance tracked in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+A 5-stage pipelined `RV32I_Zicsr_Zifencei` core in SystemVerilog — forwarding, branch prediction, precise exceptions, and a parameterised I/D cache hierarchy. Its directed, architecture-signature, and retirement-lockstep flows are independently gated, with current measurement provenance tracked in [`docs/evidence.md`](docs/evidence.md).
 
 [![RTL Tests](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/rtl-tests.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/rtl-tests.yml)
 [![RISC-V Compliance Suite](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/compliance.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/compliance.yml)
@@ -47,9 +47,9 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 - Reproduce implementation: `make synth-matrix && make synth-summary`
 <!-- portfolio:provenance:end -->
 
-![Portfolio verification demo](docs/portfolio-demo.gif)
+![Portfolio verification demo](docs/media/portfolio-demo.gif)
 
-![Datapath block diagram](docs/datapath.svg)
+![Datapath block diagram](docs/images/datapath.svg)
 
 Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. Every pipeline register carries a `valid` bit end-to-end, so a flushed bubble is always distinguishable from a retired instruction — that's what makes the counters and precise exceptions exact rather than approximate.
 
@@ -70,7 +70,7 @@ Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. 
 
 ## Synthesis
 
-This current Vivado 2025.2 matrix uses `xc7a35ticsg324-1L`, 512-word backing memories, and a deliberately aggressive 2 ns constraint. `fmax` is calculated from the routed critical path; the negative WNS values make clear that none of these configurations closes at 500 MHz. Exact commits, commands, and report hashes are in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+This current Vivado 2025.2 matrix uses `xc7a35ticsg324-1L`, 512-word backing memories, and a deliberately aggressive 2 ns constraint. `fmax` is calculated from the routed critical path; the negative WNS values make clear that none of these configurations closes at 500 MHz. Exact commits, commands, and report hashes are in [`docs/evidence.md`](docs/evidence.md).
 
 <!-- portfolio:synthesis:start -->
 | Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |
@@ -83,7 +83,7 @@ This current Vivado 2025.2 matrix uses `xc7a35ticsg324-1L`, 512-word backing mem
 
 The current write-back policy costs 418 LUT over write-through while using the same four BRAM tiles. The full hierarchy still fits below 45% LUT and 33% flip-flop utilization. Historical inference experiments below explain how the cache arrays reached Block RAM; they are retained as design studies, not mixed into the current headline matrix.
 
-Getting the D-cache to fit took four RTL revisions, and the intermediate results were the lesson: a registered read alone changed nothing (316% → 315% LUT); splitting the `[WAYS][SETS][BLOCK_WORDS]` array into per-way flat arrays did the real work (→ 82%); and `ram_style="block"` was *refused* until the two write addresses in one `always_ff` were muxed into one — a BRAM port has a single address input. Full progression in [`docs/MICROARCHITECTURE.md`](docs/MICROARCHITECTURE.md#synthesis).
+Getting the D-cache to fit took four RTL revisions, and the intermediate results were the lesson: a registered read alone changed nothing (316% → 315% LUT); splitting the `[WAYS][SETS][BLOCK_WORDS]` array into per-way flat arrays did the real work (→ 82%); and `ram_style="block"` was *refused* until the two write addresses in one `always_ff` were muxed into one — a BRAM port has a single address input. Full progression in [`docs/architecture.md`](docs/architecture.md#synthesis).
 
 **Getting the I-cache into Block RAM was worth more than the timing work.** In that historical study, the D-cache's per-way-flat-array pattern was measured against an otherwise-identical control with only the I-cache array structure reverted:
 
@@ -94,11 +94,11 @@ Getting the D-cache to fit took four RTL revisions, and the intermediate results
 
 53% fewer LUTs, 54% fewer flip-flops, and **+9.8% fmax** — about twenty times the frequency gain the deliberate timing optimization below produced. That ordering is the actual lesson: the earlier timing pass concluded this build was congestion-bound rather than logic-depth-bound, and this confirms it directly, because moving 8,241 flip-flops out of the fabric relieved exactly the congestion that a shorter logic path couldn't.
 
-The core-only row dropped from an earlier 79.2 MHz once interrupt support added a 64-bit `mtime`/`mtimecmp` comparator, which `report_timing` showed dominating the worst path (a 6-`CARRY4` ripple chain feeding straight through `irq_pending` into the PC redirect mux). Registering that comparison — one cycle of interrupt latency, which RISC-V doesn't bound — cut the chain to 3 `CARRY4` and recovered +0.34 MHz; the net gain was small because a second, route-dominated path immediately became the new worst case, meaning this build is congestion-bound rather than logic-depth-bound at this size. Detail and the real before/after `report_timing` data in [`docs/MICROARCHITECTURE.md`](docs/MICROARCHITECTURE.md#one-measured-timing-optimization).
+The core-only row dropped from an earlier 79.2 MHz once interrupt support added a 64-bit `mtime`/`mtimecmp` comparator, which `report_timing` showed dominating the worst path (a 6-`CARRY4` ripple chain feeding straight through `irq_pending` into the PC redirect mux). Registering that comparison — one cycle of interrupt latency, which RISC-V doesn't bound — cut the chain to 3 `CARRY4` and recovered +0.34 MHz; the net gain was small because a second, route-dominated path immediately became the new worst case, meaning this build is congestion-bound rather than logic-depth-bound at this size. Detail and the real before/after `report_timing` data in [`docs/architecture.md`](docs/architecture.md#one-measured-timing-optimization).
 
 ## Performance
 
-This current benchmark matrix covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The first three columns use 10-cycle instruction/data memory; the final column uses ideal one-cycle memory. It was measured on the frozen RTL in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+This current benchmark matrix covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The first three columns use 10-cycle instruction/data memory; the final column uses ideal one-cycle memory. It was measured on the frozen RTL in [`docs/evidence.md`](docs/evidence.md).
 
 <!-- portfolio:benchmarks:start -->
 | Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
@@ -137,7 +137,7 @@ Three findings from the geometry sweeps (measured pre-BRAM-rework; the qualitati
 | Functional cover points | 44/44 |
 <!-- portfolio:verification:end -->
 
-See [`docs/VERIFICATION_PLAN.md`](docs/VERIFICATION_PLAN.md) for what each mechanism catches and what it explicitly doesn't.
+See [`docs/verification.md`](docs/verification.md) for what each mechanism catches and what it explicitly doesn't.
 
 ## Build
 
@@ -186,4 +186,4 @@ The synthesis wrapper honors `VIVADO=/path/to/vivado`, then native Vivado, then 
 - **`FENCE.I` works, but this core can't demonstrate what it's for.** It decodes, invalidates the I-cache, and refetches — measurably: an identical loop goes from 3 I-cache misses to 43 with a `fence.i` in the body. What it can't show is self-modifying code becoming visible, because `instr_mem.sv` and `data_mem.sv` are *separate arrays* (a Harvard split), so a store never reaches code space at all — with or without `FENCE.I`. Unifying them is the prerequisite, and it's a memory-system change, not an ISA one.
 - **Random testing still excludes traps and CSRs.** `make soak-lockstep` now generates branches and jumps (13% of emitted instructions) and compares against Spike retirement-by-retirement, so control flow is no longer the blind spot it was — but trap-taking and CSR sequences are still directed-test-only, because generating them randomly needs the generator to model privilege state, not just instructions.
 
-[`docs/MICROARCHITECTURE.md`](docs/MICROARCHITECTURE.md) has the full spec: every trade-off with its measured cost, the hazard/exception model, and the complete synthesis progression.
+[`docs/architecture.md`](docs/architecture.md) has the full spec: every trade-off with its measured cost, the hazard/exception model, and the complete synthesis progression.

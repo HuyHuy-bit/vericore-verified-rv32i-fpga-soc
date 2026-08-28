@@ -91,20 +91,21 @@ class PortfolioDemoTest(unittest.TestCase):
         self.assertIn("--target demo", result.stdout)
 
     def test_tape_holds_the_result_for_portfolio_length(self) -> None:
-        source = (ROOT / "docs/portfolio-demo.tape").read_text(encoding="utf-8")
+        source = (ROOT / "docs/media/portfolio-demo.tape").read_text(encoding="utf-8")
         self.assertIn("Sleep 30s", source)
 
     def write_media(self) -> None:
         (self.root / "README.md").write_text(
-            "![Portfolio verification demo](docs/portfolio-demo.gif)\n", encoding="utf-8"
+            "![Portfolio verification demo](docs/media/portfolio-demo.gif)\n", encoding="utf-8"
         )
-        (self.root / "docs/portfolio-demo.txt").write_text(summary_text(self.result), encoding="utf-8")
-        (self.root / "docs/portfolio-demo.tape").write_text(
-            "Output docs/portfolio-demo.gif\nSet Width 1280\nSet Height 720\n"
+        (self.root / "docs/media").mkdir()
+        (self.root / "docs/media/portfolio-demo.txt").write_text(summary_text(self.result), encoding="utf-8")
+        (self.root / "docs/media/portfolio-demo.tape").write_text(
+            "Output docs/media/portfolio-demo.gif\nSet Width 1280\nSet Height 720\n"
             "Type \"python3 tools/portfolio_demo.py --live\"\n",
             encoding="utf-8",
         )
-        (self.root / "docs/portfolio-demo.gif").write_bytes(animated_gif())
+        (self.root / "docs/media/portfolio-demo.gif").write_bytes(animated_gif())
         write_media_manifest(self.root)
 
     def test_media_validation_checks_dimensions_frames_duration_hashes_and_link(self) -> None:
@@ -112,7 +113,7 @@ class PortfolioDemoTest(unittest.TestCase):
         with mock.patch("tools.portfolio_demo.load_validated", return_value=self.result):
             self.assertEqual(validate_media(self.root), [])
 
-        transcript = self.root / "docs/portfolio-demo.txt"
+        transcript = self.root / "docs/media/portfolio-demo.txt"
         transcript.write_text(transcript.read_text(encoding="utf-8") + "stale\n", encoding="utf-8")
         with mock.patch("tools.portfolio_demo.load_validated", return_value=self.result):
             errors = validate_media(self.root)
@@ -120,7 +121,7 @@ class PortfolioDemoTest(unittest.TestCase):
 
     def test_media_manifest_rejects_damaged_gif(self) -> None:
         self.write_media()
-        path = self.root / "docs/portfolio-demo.gif"
+        path = self.root / "docs/media/portfolio-demo.gif"
         path.write_bytes(path.read_bytes()[:-1])
         with mock.patch("tools.portfolio_demo.load_validated", return_value=self.result):
             errors = validate_media(self.root)

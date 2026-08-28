@@ -28,7 +28,7 @@ module cpu #(
     // Backing-memory depth. Defaults match the pre-parameterization sizes
     // (2MB instruction ROM, 64KB data RAM) so simulation is unaffected;
     // synthesis overrides these to fit a target device's BRAM budget - see
-    // syn/build.tcl.
+    // synthesis/build.tcl.
     parameter int IMEM_DEPTH_WORDS   = 524288,
     parameter int DMEM_DEPTH_WORDS   = 16384
 ) (

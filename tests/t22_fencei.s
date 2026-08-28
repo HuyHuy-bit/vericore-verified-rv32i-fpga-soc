@@ -12,7 +12,7 @@
 # it flushes the pipeline exactly like a trap, so getting the target wrong
 # would send execution off the rails rather than fail quietly. The I-cache
 # invalidation itself is verified separately, by watching the miss counter
-# jump when a FENCE.I runs inside a loop (see docs/MICROARCHITECTURE.md).
+# jump when a FENCE.I runs inside a loop (see docs/architecture.md).
     addi x10, x0, 1        # marker: reached before the fence
     fence.i
     addi x11, x0, 2        # only reached if the pc+4 redirect landed right

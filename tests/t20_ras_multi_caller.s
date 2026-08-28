@@ -7,7 +7,7 @@
 # correctly regardless of which site called last. This test checks
 # correctness only (final register state, which recovers either way via the
 # normal mispredict flush); the measured accuracy/CPI difference (RAS_DEPTH=8
-# vs. 0 on this exact program) is in docs/MICROARCHITECTURE.md.
+# vs. 0 on this exact program) is in docs/architecture.md.
     addi x14, x0, 5        # loop count
 loop:
     jal  ra, sub            # call site A

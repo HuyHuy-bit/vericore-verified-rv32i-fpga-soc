@@ -120,7 +120,7 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 
 | Load-use stall | Mispredict recovery | Trap at MEM commit |
 |---|---|---|
-| ![Load-use stall](timing_load_use.svg) | ![Mispredict recovery](timing_mispredict.svg) | ![Trap commit](timing_trap.svg) |
+| ![Load-use stall](images/timing_load_use.svg) | ![Mispredict recovery](images/timing_mispredict.svg) | ![Trap commit](images/timing_trap.svg) |
 
 (WaveDrom sources alongside each SVG in this directory.)
 
@@ -131,11 +131,11 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 
 ## Memory hierarchy
 
-![Memory hierarchy](mem_hierarchy.svg)
+![Memory hierarchy](images/mem_hierarchy.svg)
 
 `lsu.sv` handles RV32I subword load/store semantics (sign/zero extension, byte-enable generation); `dcache.sv`/`icache.sv` hold geometry and policy; `mem_timing.sv` is the backing-memory access-cost model everything above scales against. The burst-refill discount it models (full `LATENCY` for the first word of a block, 1 cycle per sequential word after) is what makes the block-size sweep in the README's Performance section mean anything — without it, every block size above one word would look strictly worse, which would be an artifact of the model, not a property of caches.
 
-![D-cache FSM](cache_fsm.svg)
+![D-cache FSM](images/cache_fsm.svg)
 
 ## Performance results
 
@@ -151,7 +151,7 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 
 ## Synthesis
 
-The current four-route matrix uses Vivado 2025.2, `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. Exact source identity and report hashes are tracked in [`EVIDENCE.md`](EVIDENCE.md).
+The current four-route matrix uses Vivado 2025.2, `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. Exact source identity and report hashes are tracked in [`evidence.md`](evidence.md).
 
 <!-- portfolio:synthesis:start -->
 | Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |
@@ -212,7 +212,7 @@ One honest caveat on the fmax figures: the reported critical paths (`report_timi
 
 The caveat above turned out to be only half the story. Re-synthesizing the core-only config after interrupt support landed, `report_timing`'s top 5 worst paths all shared one real, consistent source (`u_perf/cycle_count_reg`) and routed through `mtimecmp`/`mtime` comparison logic before reaching their (still confusingly-named) destinations — 6 of the path's 17 logic levels were `CARRY4` cells, the signature of a wide ripple-carry chain. That's `mip_mtip = (mtime >= mtimecmp)` in `csr.sv`: a 64-bit magnitude comparison, recomputed combinationally every cycle regardless of whether an interrupt is even enabled, feeding straight through `irq_pending` → `irq_take` into the next-PC redirect mux.
 
-The fix is a one-line, well-precedented change: register the comparison instead of leaving it combinational (`rtl/csr.sv`). RISC-V doesn't bound interrupt response latency, so spending one cycle to let `mip.MTIP` settle is free architecturally — it's the same registered-timer-pending convention a real CLINT implementation uses. Measured, same core-only config, same seed:
+The fix is a one-line, well-precedented change: register the comparison instead of leaving it combinational (`rtl/core/csr.sv`). RISC-V doesn't bound interrupt response latency, so spending one cycle to let `mip.MTIP` settle is free architecturally — it's the same registered-timer-pending convention a real CLINT implementation uses. Measured, same core-only config, same seed:
 
 | | WNS | fmax | Worst-path `CARRY4` | Worst-path logic delay |
 |---|---|---|---|---|
@@ -225,7 +225,7 @@ Revised reading of the CPI table in light of all this: the current configuration
 
 ## Verification summary
 
-See [`docs/VERIFICATION_PLAN.md`](VERIFICATION_PLAN.md) for the full breakdown. In one line each:
+See [`verification.md`](verification.md) for the full breakdown. In one line each:
 
 - 25 directed tests run across the 6-configuration cache/latency CI matrix.
 - 38/38 pinned architecture signatures and 38/38 complete Spike traces run in their own workflows, not across the directed matrix.

@@ -767,10 +767,10 @@ def collect_open(root: Path, output: Path, source_commit: str) -> None:
     architecture_expected = int(expected_text)
     stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.stage-", dir=output.parent))
     try:
-        readme = output / "README.md" if (output / "README.md").is_file() else run_dir / "README.md"
-        if not readme.is_file():
-            raise ResultError("result README is missing")
-        shutil.copyfile(readme, stage / "README.md")
+        format_doc = output / "FORMAT.md" if (output / "FORMAT.md").is_file() else run_dir / "FORMAT.md"
+        if not format_doc.is_file():
+            raise ResultError("result format documentation is missing")
+        shutil.copyfile(format_doc, stage / "FORMAT.md")
         for name in ("verification.json", "tool_versions.json", "synthesis.csv"):
             source = run_dir / name
             if not source.is_file():
@@ -827,7 +827,7 @@ def collect_synthesis(root: Path, report_dir: Path, output: Path) -> None:
     report_dir = report_dir.resolve()
     output = output.resolve()
     sys.path.insert(0, str(checkout))
-    from syn.summarize_reports import csv_summary
+    from synthesis.summarize_reports import csv_summary
 
     destination = output if output.suffix == ".csv" else output / "synthesis.csv"
     destination.parent.mkdir(parents=True, exist_ok=True)

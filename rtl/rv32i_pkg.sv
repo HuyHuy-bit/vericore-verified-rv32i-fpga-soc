@@ -25,7 +25,7 @@ package rv32i_pkg;
     //
     // Note this parameterises *width*, not the ISA: RV64I additionally needs
     // LD/SD and the *W instruction forms, which is decode work in control.sv
-    // and lsu.sv, not a width change. See docs/MICROARCHITECTURE.md.
+    // and lsu.sv, not a width change. See docs/architecture.md.
     localparam int XLEN   = 32;
     localparam int ILEN   = 32;
 

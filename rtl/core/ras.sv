@@ -17,7 +17,7 @@ import rv32i_pkg::*;
 // pipeline knows whether this fetch is even on the correct path, and a
 // flush does not roll the stack back. This can corrupt the stack after a
 // misprediction - accepted for the same reason the BTB itself is a simple,
-// uncheckpointed structure (see docs/MICROARCHITECTURE.md). A wrong pop is
+// uncheckpointed structure (see docs/architecture.md). A wrong pop is
 // still just a misprediction, caught and corrected the normal way at EX.
 module ras #(
     parameter int DEPTH = 8

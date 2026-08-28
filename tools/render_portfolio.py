@@ -16,9 +16,9 @@ else:
 
 DOCUMENT_BLOCKS = {
     "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-    "docs/EVIDENCE.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
-    "docs/MICROARCHITECTURE.md": ("facts", "benchmarks", "synthesis"),
-    "docs/VERIFICATION_PLAN.md": ("facts", "summary"),
+    "docs/evidence.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+    "docs/architecture.md": ("facts", "benchmarks", "synthesis"),
+    "docs/verification.md": ("facts", "summary"),
 }
 MARKER_RE = re.compile(r"<!-- portfolio:([a-z][a-z0-9-]*):(start|end) -->")
 

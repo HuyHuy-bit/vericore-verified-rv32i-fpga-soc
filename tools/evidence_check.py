@@ -36,9 +36,9 @@ FACT_KEYS = (
 )
 FACT_DOCUMENTS = (
     "README.md",
-    "docs/MICROARCHITECTURE.md",
-    "docs/VERIFICATION_PLAN.md",
-    "docs/EVIDENCE.md",
+    "docs/architecture.md",
+    "docs/verification.md",
+    "docs/evidence.md",
 )
 RESULT_RECORDS = (
     "manifest.json",

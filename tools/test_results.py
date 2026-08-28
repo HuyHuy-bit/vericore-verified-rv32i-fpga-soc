@@ -21,7 +21,7 @@ from tools.results import (
     validate_result_set,
     write_verification_receipt,
 )
-from syn.summarize_reports import SYNTHESIS_FIELDS as SUMMARY_SYNTHESIS_FIELDS
+from synthesis.summarize_reports import SYNTHESIS_FIELDS as SUMMARY_SYNTHESIS_FIELDS
 
 
 SHA_A = "a" * 40
@@ -35,7 +35,7 @@ class ResultSetTest(unittest.TestCase):
         self.results = self.checkout / "results"
         (self.checkout / "tools").mkdir(parents=True)
         self.results.mkdir()
-        (self.results / "README.md").write_text("fixture results\n", encoding="utf-8")
+        (self.results / "FORMAT.md").write_text("fixture results\n", encoding="utf-8")
         (self.checkout / "tools/reference_versions.env").write_text(
             "ARCH_TEST_SHA=" + SHA_A + "\n"
             "ARCH_TEST_EXPECTED=" + "".join(("3", "8")) + "\n"

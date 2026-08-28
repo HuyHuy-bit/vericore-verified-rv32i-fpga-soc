@@ -31,9 +31,9 @@ class PortfolioRendererTest(unittest.TestCase):
     def write_documents(self) -> None:
         blocks = {
             "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-            "docs/EVIDENCE.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
-            "docs/MICROARCHITECTURE.md": ("facts", "benchmarks", "synthesis"),
-            "docs/VERIFICATION_PLAN.md": ("facts", "summary"),
+            "docs/evidence.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+            "docs/architecture.md": ("facts", "benchmarks", "synthesis"),
+            "docs/verification.md": ("facts", "summary"),
         }
         for relative, names in blocks.items():
             body = [f"# {relative}", ""]
@@ -144,17 +144,17 @@ class PortfolioRendererTest(unittest.TestCase):
         rendered = render_documents(self.root, self.result)
         self.assertEqual(set(rendered), {
             self.root / "README.md",
-            self.root / "docs/EVIDENCE.md",
-            self.root / "docs/MICROARCHITECTURE.md",
-            self.root / "docs/VERIFICATION_PLAN.md",
+            self.root / "docs/evidence.md",
+            self.root / "docs/architecture.md",
+            self.root / "docs/verification.md",
         })
         self.assertIn("25 directed tests × 6 memory configurations", rendered[self.root / "README.md"])
         self.assertIn("66.7–83.3 MHz routed Artix-7 implementations", rendered[self.root / "README.md"])
         self.assertIn("RISC-V assembler 2.42", rendered[self.root / "README.md"])
-        self.assertIn("38/38", rendered[self.root / "docs/EVIDENCE.md"])
-        self.assertIn("`" + "a" * 40 + "`", rendered[self.root / "docs/EVIDENCE.md"])
-        self.assertIn("`" + "b" * 40 + "`", rendered[self.root / "docs/EVIDENCE.md"])
-        self.assertIn("`" + "0" * 64 + "` / `" + "4" * 64 + "`", rendered[self.root / "docs/EVIDENCE.md"])
+        self.assertIn("38/38", rendered[self.root / "docs/evidence.md"])
+        self.assertIn("`" + "a" * 40 + "`", rendered[self.root / "docs/evidence.md"])
+        self.assertIn("`" + "b" * 40 + "`", rendered[self.root / "docs/evidence.md"])
+        self.assertIn("`" + "0" * 64 + "` / `" + "4" * 64 + "`", rendered[self.root / "docs/evidence.md"])
         for value in rendered.values():
             self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
             self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
