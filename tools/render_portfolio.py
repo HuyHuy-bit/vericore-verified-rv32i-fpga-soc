@@ -105,18 +105,18 @@ def snapshot(result: ResultSet) -> str:
 def verification_table(result: ResultSet) -> str:
     value = result.verification
     return "\n".join((
-        "| Gate | Result |",
-        "|---|---:|",
-        f"| Decoder unit vectors | {value['decoder_vectors']:,}/{value['decoder_vectors']:,} |",
-        f"| Hazard unit vectors | {value['hazard_vectors']:,}/{value['hazard_vectors']:,} |",
-        f"| Harness tests | {value['harness_tests']}/{value['harness_tests']} |",
-        f"| Directed memory matrix | {sum(item['passed'] for item in value['memory_configurations'])}/{value['directed_programs'] * len(value['memory_configurations'])} |",
-        f"| Predictor matrix | {sum(item['passed'] for item in value['predictor_configurations'])}/{value['directed_programs'] * len(value['predictor_configurations'])} |",
-        f"| Architecture signatures | {value['architecture_tests']['passed']}/{value['architecture_tests']['discovered']} |",
-        f"| Architecture Spike lockstep | {value['architecture_lockstep']['passed']}/{value['architecture_lockstep']['discovered']} |",
-        f"| Python-model random | {value['python_random']['baseline']['passed'] + value['python_random']['cached']['passed']}/{value['python_random']['baseline']['requested'] + value['python_random']['cached']['requested']} |",
-        f"| Random Spike lockstep | {value['spike_random']['passed']}/{value['spike_random']['requested']} |",
-        f"| Functional cover points | {value['cover_points']['hit']}/{value['cover_points']['source']} |",
+        "| Metric | Value | How measured |",
+        "|---|---:|---|",
+        f"| Decoder unit vectors | {value['decoder_vectors']:,}/{value['decoder_vectors']:,} | `make unit` |",
+        f"| Hazard unit vectors | {value['hazard_vectors']:,}/{value['hazard_vectors']:,} | `make unit` |",
+        f"| Harness tests | {value['harness_tests']}/{value['harness_tests']} | `make harness-test` |",
+        f"| Directed memory matrix | {sum(item['passed'] for item in value['memory_configurations'])}/{value['directed_programs'] * len(value['memory_configurations'])} | `make verify` |",
+        f"| Predictor matrix | {sum(item['passed'] for item in value['predictor_configurations'])}/{value['directed_programs'] * len(value['predictor_configurations'])} | `make predictor-test` |",
+        f"| Architecture signatures | {value['architecture_tests']['passed']}/{value['architecture_tests']['discovered']} | `make compliance` |",
+        f"| Architecture Spike lockstep | {value['architecture_lockstep']['passed']}/{value['architecture_lockstep']['discovered']} | `make lockstep` |",
+        f"| Python-model random | {value['python_random']['baseline']['passed'] + value['python_random']['cached']['passed']}/{value['python_random']['baseline']['requested'] + value['python_random']['cached']['requested']} | `make soak SEEDS=1000` |",
+        f"| Random Spike lockstep | {value['spike_random']['passed']}/{value['spike_random']['requested']} | `make soak-lockstep SEEDS=200` |",
+        f"| Functional cover points | {value['cover_points']['hit']}/{value['cover_points']['source']} | `make coverage` |",
     ))
 
 

@@ -35,18 +35,18 @@ central reference metadata by `make evidence-check`.
 ## Current verification measurements
 
 <!-- portfolio:verification:start -->
-| Gate | Result |
-|---|---:|
-| Decoder unit vectors | 2,120/2,120 |
-| Hazard unit vectors | 262,144/262,144 |
-| Harness tests | 109/109 |
-| Directed memory matrix | 150/150 |
-| Predictor matrix | 75/75 |
-| Architecture signatures | 38/38 |
-| Architecture Spike lockstep | 38/38 |
-| Python-model random | 2000/2000 |
-| Random Spike lockstep | 200/200 |
-| Functional cover points | 44/44 |
+| Metric | Value | How measured |
+|---|---:|---|
+| Decoder unit vectors | 2,120/2,120 | `make unit` |
+| Hazard unit vectors | 262,144/262,144 | `make unit` |
+| Harness tests | 109/109 | `make harness-test` |
+| Directed memory matrix | 150/150 | `make verify` |
+| Predictor matrix | 75/75 | `make predictor-test` |
+| Architecture signatures | 38/38 | `make compliance` |
+| Architecture Spike lockstep | 38/38 | `make lockstep` |
+| Python-model random | 2000/2000 | `make soak SEEDS=1000` |
+| Random Spike lockstep | 200/200 | `make soak-lockstep SEEDS=200` |
+| Functional cover points | 44/44 | `make coverage` |
 <!-- portfolio:verification:end -->
 
 The six directed configurations were baseline; `IMEM_LAT=10 DMEM_LAT=10`;
