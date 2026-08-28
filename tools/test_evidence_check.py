@@ -451,6 +451,19 @@ class EvidenceContractTest(unittest.TestCase):
         )
         self.assert_contract_failure("approved immutable commits")
 
+    def test_container_workflow_rejects_shallow_evidence_checkout(self) -> None:
+        self.use_container_workflows()
+        path = self.repo / ".github/workflows/rtl-tests.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "        with:\n          fetch-depth: 0\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assert_contract_failure("evidence checkout must fetch full history")
+
     def test_container_workflow_rejects_missing_predictor_profile(self) -> None:
         self.use_container_workflows()
         path = self.repo / ".github/workflows/rtl-tests.yml"

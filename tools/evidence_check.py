@@ -867,6 +867,7 @@ def check_container_job(
     name: str,
     commands: tuple[str, ...],
     cache: bool,
+    full_history: bool = False,
 ) -> None:
     job = required_job(path, jobs, name)
     if set(job.values) != {"runs-on", "timeout-minutes", "steps"}:
@@ -886,6 +887,12 @@ def check_container_job(
         raise ContractError(f"{path.name}: action dependencies must use approved immutable commits")
     if not job.steps or job.steps[0].values.get("uses") != CHECKOUT_ACTION:
         raise ContractError(f"{path.name}: checkout must be the first step")
+    checkout_with = job.steps[0].nested.get("with", {})
+    expected_checkout_with = {"fetch-depth": "0"} if full_history else {}
+    if checkout_with != expected_checkout_with:
+        if full_history:
+            raise ContractError(f"{path.name}: evidence checkout must fetch full history")
+        raise ContractError(f"{path.name}: checkout properties are not canonical")
     command_steps = [step for step in job.steps if "run" in step.values]
     if tuple(step.run.strip() for step in command_steps) != commands:
         raise ContractError(f"{path.name}: container verification commands are not canonical")
@@ -913,6 +920,7 @@ def check_container_workflows(
             "python3 tools/verification.py container --profile portfolio",
         ),
         False,
+        True,
     )
     compliance_path, _, compliance_jobs = parsed["compliance.yml"]
     check_container_job(
