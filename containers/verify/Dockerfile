@@ -59,9 +59,14 @@ ARG VHS_VERSION
 ARG VHS_URL
 ARG VHS_SHA256
 ARG FFMPEG_VERSION
+ENV VHS_NO_SANDBOX=true
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg fonts-dejavu-core ttyd=1.7.4-1build2 \
+        libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+        libcups2t64 libatspi2.0-0t64 libxcomposite1 libxdamage1 \
     && ffmpeg -version | head -n 1 | grep -F "$FFMPEG_VERSION" \
+    && ttyd --version | grep -F "1.7.4" \
     && curl -fsSL "$VHS_URL" -o /tmp/vhs.deb \
     && printf '%s  %s\n' "$VHS_SHA256" /tmp/vhs.deb | sha256sum -c - \
     && dpkg -i /tmp/vhs.deb \

@@ -119,6 +119,23 @@ class ContainerContractTest(unittest.TestCase):
         self.assertNotRegex(source, r"(?m)^\s*(COPY|ADD)\s+[^-].*\s+/work")
         self.assertIn("WORKDIR /work", source)
 
+    def test_demo_image_pins_vhs_runtime(self):
+        source = self.text("containers/verify/Dockerfile")
+        self.assertIn("ttyd=1.7.4-1build2", source)
+        self.assertIn("ttyd --version", source)
+        self.assertIn("ENV VHS_NO_SANDBOX=true", source)
+        for package in (
+            "libnss3",
+            "libnspr4",
+            "libatk1.0-0t64",
+            "libatk-bridge2.0-0t64",
+            "libcups2t64",
+            "libatspi2.0-0t64",
+            "libxcomposite1",
+            "libxdamage1",
+        ):
+            self.assertIn(package, source)
+
     def test_entrypoint_checks_container_marker(self):
         source = self.text("containers/verify/entrypoint.sh")
         self.assertIn("tool_environment.py container", source)

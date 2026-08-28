@@ -90,6 +90,10 @@ class PortfolioDemoTest(unittest.TestCase):
         self.assertIn("portfolio-demo-record", result.stdout)
         self.assertIn("--target demo", result.stdout)
 
+    def test_tape_holds_the_result_for_portfolio_length(self) -> None:
+        source = (ROOT / "docs/portfolio-demo.tape").read_text(encoding="utf-8")
+        self.assertIn("Sleep 30s", source)
+
     def write_media(self) -> None:
         (self.root / "README.md").write_text(
             "![Portfolio verification demo](docs/portfolio-demo.gif)\n", encoding="utf-8"

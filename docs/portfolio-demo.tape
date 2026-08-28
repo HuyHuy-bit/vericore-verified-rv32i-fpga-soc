@@ -11,4 +11,4 @@ Set TypingSpeed 25ms
 
 Type "python3 tools/portfolio_demo.py --live"
 Enter
-Sleep 5s
+Sleep 30s
