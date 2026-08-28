@@ -1,29 +1,62 @@
+# Simulation/build outputs
 obj_dir*/
 coverage/
-__pycache__/
+work/
+transcript
+xsim.dir/
+csrc/
+simv*
+ucli.key
 *.vcd
+*.fst
+*.wlf
+*.vpd
+*.o
+*.d
+
+# Generated test/compliance output
 tests/*.hex
+tests/*.vcd
 compliance/*.elf
 compliance/*.hex
 compliance/*.sig.output
 
-# Output of the graphify tooling - a supplemental analysis artifact,
-# regenerated on demand and not part of the design.
-graphify-out/
+# Vivado/synthesis output
+synthesis/reports/
+synthesis/.synth-reports-*/
+synthesis/out_*/
+.Xil/
+*.xpr
+*.dcp
+*.bit
+*.jou
+*.str
+*.log
+*.rpt
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
 
-syn/reports/
-syn/.synth-reports-*/
-syn/.Xil/
-syn/*.xpr
-syn/*.dcp
-syn/*.jou
-syn/*.log
-syn/*.rpt
-syn/*.cache/
-syn/*.gen/
-syn/*.hw/
-syn/*.ip_user_files/
-syn/*.runs/
-syn/out_*/
+# Language/editor/system caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Repository-local fetched and measurement output
 .verify-cache/
 .portfolio-runs/
+graphify-out/
+
+# Local assistant/worktree state
+.claude/
+.superpowers/
+docs/superpowers/
