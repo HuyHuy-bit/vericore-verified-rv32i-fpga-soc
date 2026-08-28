@@ -42,6 +42,8 @@ OBJDIR   = obj_dir
 else
 OBJDIR   = obj_dir_ic$(IC_BYTES)_$(IC_BLOCK)_$(IC_WAYS)_dc$(DC_BYTES)_$(DC_BLOCK)_$(DC_WAYS)_$(DC_WB)_L$(IMEM_LAT)_$(DMEM_LAT)_bp$(BTB_IDX_BITS)_$(BTB_TAG_BITS)_$(GSHARE)_$(RAS_DEPTH)
 endif
+BUILD_ENV_ID := $(shell python3 tools/build_environment.py identity)
+BUILD_STAMP = $(OBJDIR)/.environment-$(BUILD_ENV_ID)
 SIM      = $(OBJDIR)/V$(TOP)
 ASM      = python3 tools/asm.py
 
@@ -53,7 +55,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-check
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -68,7 +70,9 @@ config-id: config-check
 
 # Build the simulator binary.
 sim: config-check $(SIM)
-$(SIM): $(CPU_SRCS) $(TB)
+$(BUILD_STAMP):
+	@python3 tools/build_environment.py prepare --build-dir "$(OBJDIR)" --identity "$(BUILD_ENV_ID)"
+$(SIM): $(BUILD_STAMP) $(CPU_SRCS) $(TB)
 	verilator $(VFLAGS) $(GPARAMS) --Mdir $(OBJDIR) --top-module $(TOP) $(CPU_SRCS) $(TB)
 
 # Assemble every test program that is out of date.
@@ -80,6 +84,7 @@ tests/%.hex: tests/%.s tools/asm.py
 # reports is scaled by this, and an off-by-one here would bias results
 # silently rather than failing anything.
 memtiming:
+	@python3 tools/build_environment.py prepare --build-dir obj_dir_memtiming --identity "$(BUILD_ENV_ID)"
 	@verilator --cc --exe --build -j 0 --top-module mem_timing -GLATENCY=10 \
 	    --Mdir obj_dir_memtiming rtl/rv32i_pkg.sv rtl/mem_timing.sv tb/mem_timing_tb.cpp > /dev/null
 	@./obj_dir_memtiming/Vmem_timing
@@ -140,7 +145,7 @@ harness-test: sim
 	python3 -m unittest -v tools.test_arch_compat
 	python3 -m unittest -v tools.test_tool_environment tools.test_configuration tools.test_verification \
 		tools.test_prepare_references tools.test_results tools.test_render_portfolio \
-		tools.test_portfolio_demo tools.test_runtime
+		tools.test_portfolio_demo tools.test_runtime tools.test_unit_runner tools.test_build_environment
 	@$(MAKE) --no-print-directory sim IC_BYTES=0 DC_BYTES=4096 DC_WAYS=4 DC_WB=0 IMEM_LAT=1 DMEM_LAT=10
 	SIM="$(CURDIR)/obj_dir_ic0_4_1_dc4096_4_4_0_L1_10_bp6_10_0_8/Vcpu" \
 		python3 -m unittest -v tools.test_harness.HarnessTest.test_tohost_bypasses_dcache
@@ -198,6 +203,7 @@ wave: sim assemble
 # and annotate. Report: docs/coverage.md.
 COVDIR = obj_dir_cov_bp$(BTB_IDX_BITS)_2_$(GSHARE)_$(RAS_DEPTH)
 coverage: config-check assemble
+	@python3 tools/build_environment.py prepare --build-dir "$(COVDIR)" --identity "$(BUILD_ENV_ID)"
 	verilator --cc --exe --build --trace --assert --timing --coverage \
 	    -GIMEM_LATENCY=10 -GDMEM_LATENCY=10 \
 	    -GICACHE_BYTES=1024 -GICACHE_BLOCK_WORDS=4 -GICACHE_WAYS=4 \
@@ -235,14 +241,23 @@ coverage: config-check assemble
 # to match the memory map Spike forces programs to link at — see
 # compliance/link/spike-lockstep.ld.
 LOCKSTEP_DIR = obj_dir_lockstep_bp$(BTB_IDX_BITS)_$(BTB_TAG_BITS)_$(GSHARE)_$(RAS_DEPTH)
+LOCKSTEP_STAMP = $(LOCKSTEP_DIR)/.environment-$(BUILD_ENV_ID)
+LOCKSTEP_SIM = $(LOCKSTEP_DIR)/V$(TOP)
 LOCKSTEP_TIMEOUT ?= 300
-lockstep-sim: config-check
+lockstep-sim: config-check $(LOCKSTEP_SIM)
+$(LOCKSTEP_STAMP):
+	@python3 tools/build_environment.py prepare --build-dir "$(LOCKSTEP_DIR)" --identity "$(BUILD_ENV_ID)"
+$(LOCKSTEP_SIM): $(LOCKSTEP_STAMP) $(CPU_SRCS) $(TB)
 	verilator $(VFLAGS) $(GPARAMS) -GRESET_PC=0x80000000 --Mdir $(LOCKSTEP_DIR) \
 	    --top-module $(TOP) $(CPU_SRCS) $(TB)
 
 lockstep: lockstep-sim
 	SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)" LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) \
 		./tools/run_lockstep.sh
+
+lockstep-sample: lockstep-sim
+	SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)" LOCKSTEP_TIMEOUT=$(LOCKSTEP_TIMEOUT) \
+		LOCKSTEP_CASE=add-01 ./tools/run_lockstep.sh
 
 # Constrained-random regression: SEEDS random programs against the Python
 # golden model (tools/rv32i_model.py). make soak SEEDS=1000
@@ -286,6 +301,18 @@ portfolio-render:
 portfolio-render-check:
 	python3 -m unittest -v tools.test_render_portfolio
 	python3 tools/render_portfolio.py --check
+
+portfolio-demo:
+	python3 tools/portfolio_demo.py --live
+
+portfolio-demo-record:
+	python3 tools/prepare_references.py
+	python3 tools/portfolio_demo.py --write-transcript
+	vhs docs/portfolio-demo.tape
+	python3 tools/portfolio_demo.py --write-media-manifest
+
+portfolio-gif:
+	python3 tools/verification.py container --target demo --command make --no-print-directory portfolio-demo-record
 
 portfolio-check:
 	python3 -m unittest -v tools.test_portfolio_demo

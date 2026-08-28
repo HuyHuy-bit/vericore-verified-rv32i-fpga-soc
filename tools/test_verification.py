@@ -144,6 +144,13 @@ class ContainerCommandTest(unittest.TestCase):
             ("--receipt", ".portfolio-runs/current/verification.json"),
         )
 
+    def test_demo_container_runs_an_explicit_repository_command(self):
+        command = docker_run_command(
+            ROOT, "fast", "demo", uid=123, gid=456,
+            command=("make", "portfolio-demo-record"),
+        )
+        self.assertEqual(command[-2:], ("make", "portfolio-demo-record"))
+
 
 if __name__ == "__main__":
     unittest.main()

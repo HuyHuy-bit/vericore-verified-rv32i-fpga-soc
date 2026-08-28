@@ -5,6 +5,7 @@ What's tested, by what mechanism, and what's explicitly not tested yet.
 <details>
 <summary>Machine-checked repository facts</summary>
 
+<!-- portfolio:facts:start -->
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
@@ -22,9 +23,11 @@ EVIDENCE_FACT ARCH_TEST_EXPECTED=38
 EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
 EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 <!-- evidence-facts:end -->
+<!-- portfolio:facts:end -->
 
 </details>
 
+<!-- portfolio:summary:start -->
 | Mechanism | Scale | What it uniquely catches |
 |---|---|---|
 | Directed tests | 25 programs × 6 cache configs | The specific hazard/trap each was written for |
@@ -33,6 +36,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 | Assertions | 25 concurrent properties + 2 immediate checks | Invariant violations, in any test, immediately |
 | Functional coverage | 44/44 source points hit (100%) | Instrumented scenarios |
 | Constrained-random | 1000 seeds vs. a Python model; 200 vs. Spike | Blind spots of whoever wrote the directed tests |
+<!-- portfolio:summary:end -->
 
 ## Directed tests (`tests/`, run via `make all`)
 

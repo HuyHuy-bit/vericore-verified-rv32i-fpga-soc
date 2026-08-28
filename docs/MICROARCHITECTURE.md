@@ -7,6 +7,7 @@ A 5-stage in-order `RV32I_Zicsr_Zifencei` pipeline optimized for **measurable tr
 <details>
 <summary>Machine-checked repository facts</summary>
 
+<!-- portfolio:facts:start -->
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
@@ -24,6 +25,7 @@ EVIDENCE_FACT ARCH_TEST_EXPECTED=38
 EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
 EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 <!-- evidence-facts:end -->
+<!-- portfolio:facts:end -->
 
 </details>
 
@@ -137,18 +139,22 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 
 ## Performance results
 
+<!-- portfolio:benchmarks:start -->
 See the README's [Performance](../README.md#performance) section for the full CPI table and the three sweep findings (block-size/hit-rate inversion, write-back's non-uniform win, and `llist`'s non-monotonic block-size behavior).
+<!-- portfolio:benchmarks:end -->
 
 ## Synthesis
 
 The current four-route matrix uses Vivado 2025.2, `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. Exact source identity and report hashes are tracked in [`EVIDENCE.md`](EVIDENCE.md).
 
+<!-- portfolio:synthesis:start -->
 | Config | Result | fmax | WNS | LUT | FF | BRAM tiles |
 |---|---|---:|---:|---:|---:|---:|
 | core only (no caches) | Routed | 76.272 MHz | −11.111 ns | 4,031 / 20,800 (19.4%) | 5,220 / 41,600 (12.5%) | 0.5 / 50 |
 | + 1KB I-cache (4-way) | Routed | 73.730 MHz | −11.563 ns | 5,011 / 20,800 (24.1%) | 6,970 / 41,600 (16.8%) | 2 / 50 |
 | + 4KB D-cache, write-through | Routed | 70.562 MHz | −12.172 ns | 8,800 / 20,800 (42.3%) | 13,527 / 41,600 (32.5%) | 4 / 50 |
 | + 4KB D-cache, write-back | Routed | 71.839 MHz | −11.920 ns | 9,218 / 20,800 (44.3%) | 13,517 / 41,600 (32.5%) | 4 / 50 |
+<!-- portfolio:synthesis:end -->
 
 The current comparison shows two direct costs:
 

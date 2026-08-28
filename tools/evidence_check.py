@@ -40,6 +40,13 @@ FACT_DOCUMENTS = (
     "docs/VERIFICATION_PLAN.md",
     "docs/EVIDENCE.md",
 )
+RESULT_RECORDS = (
+    "manifest.json",
+    "verification.json",
+    "benchmarks.csv",
+    "synthesis.csv",
+    "tool_versions.json",
+)
 CANONICAL_ISA = "RV32I_Zicsr_Zifencei"
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 COUNT_RE = re.compile(r"[1-9][0-9]*\Z")
@@ -903,6 +910,7 @@ def check_container_workflows(
             "python3 tools/verification.py container --profile fast",
             "python3 tools/verification.py container --profile directed-memory",
             "python3 tools/verification.py container --profile directed-predictor",
+            "python3 tools/verification.py container --profile portfolio",
         ),
         False,
     )
@@ -1230,6 +1238,35 @@ def workflow_seed(root: Path) -> int:
     return seeds[0]
 
 
+def check_published_portfolio(
+    root: Path,
+    record_validator: Callable[[Path, Path], list[str]] | None = None,
+    document_checker: Callable[[Path], list[str]] | None = None,
+) -> None:
+    result_root = root / "results"
+    present = {name for name in RESULT_RECORDS if (result_root / name).is_file()}
+    if not present:
+        return
+    if present != set(RESULT_RECORDS):
+        missing = sorted(set(RESULT_RECORDS) - present)
+        raise ContractError(f"result records are incomplete: missing {missing[0]}")
+    if record_validator is None or document_checker is None:
+        if __package__:
+            from .render_portfolio import check_documents
+            from .results import validate_result_set
+        else:
+            from render_portfolio import check_documents
+            from results import validate_result_set
+        record_validator = record_validator or validate_result_set
+        document_checker = document_checker or check_documents
+    for errors in (
+        record_validator(result_root, root),
+        document_checker(root),
+    ):
+        if errors:
+            raise ContractError(errors[0])
+
+
 def check_repository_evidence(root: Path) -> None:
     versions = parse_reference_versions(root)
     check_build_surface(root)
@@ -1274,6 +1311,7 @@ def check_repository_evidence(root: Path) -> None:
             raise ContractError(
                 f"evidence fact {key}={actual} does not match derived value {expected[key]}"
             )
+    check_published_portfolio(root)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

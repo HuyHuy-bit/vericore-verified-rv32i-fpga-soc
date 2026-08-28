@@ -426,6 +426,10 @@ class CoverageTargetTest(unittest.TestCase):
         self.write_executable("verilator", f"""#!{sys.executable}
 from pathlib import Path
 import sys
+if "-V" in sys.argv:
+    print("Verilator 5.048")
+    print("VERILATOR_ROOT = /fixture/verilator")
+    sys.exit(0)
 out = Path(sys.argv[sys.argv.index("--Mdir") + 1])
 out.mkdir(parents=True, exist_ok=True)
 (out / "Vcpu").write_text('''#!{sys.executable}
@@ -1646,6 +1650,31 @@ exec "$REAL_PYTHON" "$@"
             "ARCH_TEST_SHA=" + "a" * 40
             + "\nARCH_TEST_EXPECTED=2\nSPIKE_SHA=" + "b" * 40 + "\n")
         self.assert_wrapper_failure("discovered 1 lockstep cases; expected 2")
+
+    def test_named_sample_runs_one_case_after_full_population_check(self):
+        (self.src_dir / "alpha.S").write_text("nop\n")
+        (self.src_dir / "beta.S").write_text("nop\n")
+        self.versions.write_text(
+            "ARCH_TEST_SHA=" + "a" * 40
+            + "\nARCH_TEST_EXPECTED=2\nSPIKE_SHA=" + "b" * 40 + "\n"
+        )
+        compile_log = self.work / "compile.log"
+        self.env["LOCKSTEP_CASE"] = "beta"
+        self.env["FAKE_COMPILE_LOG"] = str(compile_log)
+        self.write_tool("riscv64-unknown-elf-gcc", """
+printf '%s\n' "$*" >> "$FAKE_COMPILE_LOG"
+touch "${@: -1}"
+""")
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("1/1 programs match", result.stdout)
+        self.assertIn("beta.S", compile_log.read_text())
+        self.assertNotIn("alpha.S", compile_log.read_text())
+
+    def test_unknown_sample_case_is_rejected(self):
+        self.add_source()
+        self.env["LOCKSTEP_CASE"] = "missing"
+        self.assert_wrapper_failure("requested lockstep case not found: missing")
 
     def test_zero_deadlines_are_rejected_before_compiler_or_comparator(self):
         self.add_source()

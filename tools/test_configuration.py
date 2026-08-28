@@ -94,9 +94,17 @@ class MakeConfigurationTest(unittest.TestCase):
     def test_lockstep_targets_use_the_configured_build_identity(self):
         source = (ROOT / "Makefile").read_text(encoding="utf-8")
         assignment = 'SIM="$(CURDIR)/$(LOCKSTEP_DIR)/V$(TOP)"'
-        self.assertEqual(source.count(assignment), 2)
+        self.assertEqual(source.count(assignment), 3)
         self.assertIn("lockstep: lockstep-sim", source)
+        self.assertIn("lockstep-sample: lockstep-sim", source)
         self.assertIn("soak-lockstep: lockstep-sim", source)
+
+    def test_simulator_depends_on_the_build_environment_stamp(self):
+        result = self.make("-qp")
+        database = result.stdout
+        matches = [line for line in database.splitlines() if line.startswith("obj_dir/Vcpu:")]
+        self.assertEqual(len(matches), 1, result.stdout + result.stderr)
+        self.assertRegex(matches[0], r"obj_dir/\.environment-[0-9a-f]{12}")
 
 
 if __name__ == "__main__":

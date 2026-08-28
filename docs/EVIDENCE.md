@@ -14,6 +14,7 @@ Vivado 2025.2 build 6299465.
 
 ## Machine-checked facts
 
+<!-- portfolio:facts:start -->
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
@@ -31,6 +32,7 @@ EVIDENCE_FACT ARCH_TEST_EXPECTED=38
 EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
 EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 <!-- evidence-facts:end -->
+<!-- portfolio:facts:end -->
 
 These values are checked against the Make test list and on-disk pairs, RTL
 assertions and covers, workflow matrix and seed command, coverage report, and
@@ -38,6 +40,7 @@ central reference metadata by `make evidence-check`.
 
 ## Current verification measurements
 
+<!-- portfolio:verification:start -->
 | Evidence | Command or configuration | Result |
 |---|---|---|
 | Fast correctness | `make check` | Pass: decoder 2,120 cases; hazard 262,144 cases; harness 102 tests; lint and evidence checks clean |
@@ -48,6 +51,7 @@ central reference metadata by `make evidence-check`.
 | Spike architecture lockstep | `make lockstep` | 38/38 complete retirement traces |
 | Spike random lockstep | `make soak-lockstep SEEDS=200` | 200/200, 60 generated instructions per seed |
 | Functional coverage | `make coverage` | user 44/44 (100%); line 260/278; branch 186/198; expression 202/221 |
+<!-- portfolio:verification:end -->
 
 The six directed configurations were baseline; `IMEM_LAT=10 DMEM_LAT=10`;
 1KB four-way I$; that I$ plus a 4KB four-way write-through D$; the same with a
@@ -59,6 +63,7 @@ rows used 10-cycle instruction and data backing memory.
 Each row below passed its host-oracle result check. `make bench` selected the
 exact simulator built for the listed parameters.
 
+<!-- portfolio:benchmarks:start -->
 | Kernel | 10-cycle, uncached | +1KB 4-way I$ | +4KB 4-way write-back D$ | 1-cycle, uncached |
 |---|---:|---:|---:|---:|
 | crc32 | 699,094 cycles / 11.3618 CPI | 160,026 / 2.60078 | 142,114 / 2.30967 | 71,776 / 1.16652 |
@@ -66,6 +71,7 @@ exact simulator built for the listed parameters.
 | sort | 2,521,051 / 12.4833 | 1,038,463 / 5.14208 | 504,847 / 2.49981 | 252,106 / 1.24833 |
 | llist | 932,261 / 10.0023 | 465,080 / 4.98986 | 188,616 / 2.02367 | 93,227 / 1.00024 |
 | interp | 14,644,581 / 11.8821 | 4,474,900 / 3.63078 | 2,930,114 / 2.37740 | 1,464,459 / 1.18821 |
+<!-- portfolio:benchmarks:end -->
 
 Commands were `make bench IMEM_LAT=10 DMEM_LAT=10`; the same with
 `IC_BYTES=1024 IC_WAYS=4`; the same with `DC_BYTES=4096 DC_WAYS=4 DC_WB=1`;
@@ -78,12 +84,14 @@ and plain `make bench` for ideal one-cycle uncached memory.
 constraint is intentionally aggressive; all WNS values are negative, so these
 are routed critical-path estimates rather than timing closure claims.
 
+<!-- portfolio:synthesis:start -->
 | Configuration | LUT | FF | BRAM tiles | WNS | Critical path | fmax |
 |---|---:|---:|---:|---:|---:|---:|
 | core | 4,031 | 5,220 | 0.5 | −11.111 ns | 13.111 ns | 76.272 MHz |
 | 1KB four-way I$ | 5,011 | 6,970 | 2 | −11.563 ns | 13.563 ns | 73.730 MHz |
 | +4KB four-way write-through D$ | 8,800 | 13,527 | 4 | −12.172 ns | 14.172 ns | 70.562 MHz |
 | +4KB four-way write-back D$ | 9,218 | 13,517 | 4 | −11.920 ns | 13.920 ns | 71.839 MHz |
+<!-- portfolio:synthesis:end -->
 
 The ignored manifests bind every route to the source and RTL commits above.
 The SHA-256 pairs below are `utilization.rpt` / `timing_summary.rpt`:
@@ -94,6 +102,11 @@ The SHA-256 pairs below are `utilization.rpt` / `timing_summary.rpt`:
 | I$ | `9c4ccc72945626942e635035a2738b4d868243901b71172dc017ed976ab2fd96` / `a49b9623d1b362e7b96802c9fdf78ad7d2b4e8fd783a3163c798a9a8bb877d90` |
 | D$ write-through | `145fb0856275c4390bbe067c33fee4913ecc958ef55793feceb5c5739013404c` / `0ec010407093f5571264a3322992ab9ccbb19538ee178014478e9f29eaa09f0f` |
 | D$ write-back | `61701ff07c81611f25774c1b81c0e79479d666be32c4b09dd23262119b0d5f8d` / `d9e6a7b376809d8520df9e2f5c3953c19c8da5fe415e353427ca3f93f5fef219` |
+
+<!-- portfolio:provenance:start -->
+- Reproduce verification with `make verify`.
+- Reproduce implementation with `make synth-matrix && make synth-summary`.
+<!-- portfolio:provenance:end -->
 
 ## Historical material
 

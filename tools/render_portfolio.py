@@ -15,10 +15,10 @@ else:
 
 
 DOCUMENT_BLOCKS = {
-    "README.md": ("snapshot", "verification", "benchmarks", "synthesis"),
+    "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
     "docs/EVIDENCE.md": ("facts", "verification", "benchmarks", "synthesis", "provenance"),
-    "docs/MICROARCHITECTURE.md": ("benchmarks", "synthesis"),
-    "docs/VERIFICATION_PLAN.md": ("summary",),
+    "docs/MICROARCHITECTURE.md": ("facts", "benchmarks", "synthesis"),
+    "docs/VERIFICATION_PLAN.md": ("facts", "summary"),
 }
 MARKER_RE = re.compile(r"<!-- portfolio:([a-z][a-z0-9-]*):(start|end) -->")
 
@@ -89,15 +89,16 @@ def synthesis_table(result: ResultSet) -> str:
 def snapshot(result: ResultSet) -> str:
     verification = result.verification
     assertions = verification["assertions"]["concurrent"] + verification["assertions"]["immediate"]
+    frequencies = [float(row["fmax_mhz"]) for row in result.synthesis]
     return (
-        "> **Portfolio Snapshot**  \n"
-        f"> 5-stage `RV32I_Zicsr_Zifencei` • {verification['directed_programs']} directed tests × "
+        f"> **Portfolio Snapshot** — 5-stage `RV32I_Zicsr_Zifencei` • {verification['directed_programs']} directed tests × "
         f"{len(verification['memory_configurations'])} memory configurations • "
         f"{len(verification['predictor_configurations'])} predictor configurations • "
         f"{verification['architecture_tests']['passed']}/{verification['architecture_tests']['discovered']} architecture signatures • "
         f"{verification['architecture_lockstep']['passed']}/{verification['architecture_lockstep']['discovered']} Spike lockstep • "
         f"{verification['spike_random']['passed']}/{verification['spike_random']['requested']} random Spike seeds • "
-        f"{assertions} assertions • {verification['cover_points']['hit']}/{verification['cover_points']['source']} functional cover points"
+        f"{assertions} assertions • {verification['cover_points']['hit']}/{verification['cover_points']['source']} functional cover points • "
+        f"{min(frequencies):.1f}–{max(frequencies):.1f} MHz routed Artix-7 implementations"
     )
 
 
@@ -123,7 +124,7 @@ def facts(result: ResultSet) -> str:
     value = result.verification
     assertions = value["assertions"]["concurrent"] + value["assertions"]["immediate"]
     matrix = ",".join(item["name"] for item in value["memory_configurations"])
-    return "\n".join((
+    rows = "\n".join((
         "EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei",
         f"EVIDENCE_FACT DIRECTED_TESTS={value['directed_programs']}",
         f"EVIDENCE_FACT ASSERTIONS_TOTAL={assertions}",
@@ -140,6 +141,7 @@ def facts(result: ResultSet) -> str:
         f"EVIDENCE_FACT SPIKE_SHA={result.tool_versions['spike_commit']}",
         f"EVIDENCE_FACT SPIKE_RANDOM_SEEDS={value['spike_random']['requested']}",
     ))
+    return f"<!-- evidence-facts:begin -->\n{rows}\n<!-- evidence-facts:end -->"
 
 
 def provenance(result: ResultSet) -> str:
@@ -150,8 +152,11 @@ def provenance(result: ResultSet) -> str:
         f"- Tooling commit: `{result.manifest['tooling_commit']}`",
         f"- Frozen RTL commit: `{result.manifest['rtl_commit']}`",
         f"- Canonical container: `{tools['container']['image']}:{tools['container']['revision']}`",
-        f"- Open tools: Ubuntu {tools['ubuntu']}; Verilator {tools['verilator']}; RISC-V GCC {tools['riscv_gcc']}; Python {tools['python']}",
+        f"- Open tools: Ubuntu {tools['ubuntu']}; Verilator {tools['verilator']}; RISC-V GCC {tools['riscv_gcc']}; RISC-V assembler {tools['riscv_as']}; Python {tools['python']}",
         f"- Vivado: {synth['vivado_version']} build {synth['vivado_build']}; `{synth['part']}`; measured {synth['measurement_date']}",
+        "- Reproduce verification: `make verify`",
+        "- Reproduce benchmarks: `make bench` with the recorded headline configuration",
+        "- Reproduce implementation: `make synth-matrix && make synth-summary`",
     ))
 
 

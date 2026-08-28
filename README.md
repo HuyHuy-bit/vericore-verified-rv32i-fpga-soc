@@ -9,6 +9,7 @@ A 5-stage pipelined `RV32I_Zicsr_Zifencei` core in SystemVerilog — forwarding,
 <details>
 <summary>Machine-checked repository facts</summary>
 
+<!-- portfolio:facts:start -->
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
@@ -26,8 +27,19 @@ EVIDENCE_FACT ARCH_TEST_EXPECTED=38
 EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
 EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 <!-- evidence-facts:end -->
+<!-- portfolio:facts:end -->
 
 </details>
+
+<!-- portfolio:snapshot:start -->
+> **Portfolio Snapshot** — 5-stage `RV32I_Zicsr_Zifencei` • 25 directed tests × 6 memory configurations • 3 predictor configurations • 38/38 architecture signatures • 38/38 Spike lockstep • 200/200 random Spike seeds • 27 assertions • 44/44 functional cover points • 70.6–76.3 MHz routed Artix-7 implementations
+<!-- portfolio:snapshot:end -->
+
+<!-- portfolio:provenance:start -->
+- Current evidence provenance is recorded in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+<!-- portfolio:provenance:end -->
+
+![Portfolio verification demo](docs/portfolio-demo.gif)
 
 ![Datapath block diagram](docs/datapath.svg)
 
@@ -52,12 +64,14 @@ Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. 
 
 This current Vivado 2025.2 matrix uses `xc7a35ticsg324-1L`, 512-word backing memories, and a deliberately aggressive 2 ns constraint. `fmax` is calculated from the routed critical path; the negative WNS values make clear that none of these configurations closes at 500 MHz. Exact commits, commands, and report hashes are in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
+<!-- portfolio:synthesis:start -->
 | Config | fmax | WNS | LUT | FF | BRAM tiles |
 |---|---:|---:|---:|---:|---:|
 | core only | 76.272 MHz | −11.111 ns | 4,031 (19.4%) | 5,220 (12.5%) | 0.5 |
 | + 1KB I$ (4-way) | 73.730 MHz | −11.563 ns | 5,011 (24.1%) | 6,970 (16.8%) | 2 |
 | + 4KB D$ write-through | 70.562 MHz | −12.172 ns | 8,800 (42.3%) | 13,527 (32.5%) | 4 |
 | + 4KB D$ write-back | 71.839 MHz | −11.920 ns | 9,218 (44.3%) | 13,517 (32.5%) | 4 |
+<!-- portfolio:synthesis:end -->
 
 The current write-back policy costs 418 LUT over write-through while using the same four BRAM tiles. The full hierarchy still fits below 45% LUT and 33% flip-flop utilization. Historical inference experiments below explain how the cache arrays reached Block RAM; they are retained as design studies, not mixed into the current headline matrix.
 
@@ -78,6 +92,7 @@ The core-only row dropped from an earlier 79.2 MHz once interrupt support added 
 
 This current benchmark matrix covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The first three columns use 10-cycle instruction/data memory; the final column uses ideal one-cycle memory. It was measured on the frozen RTL in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
+<!-- portfolio:benchmarks:start -->
 | kernel | no caches | +1KB I$ | +4KB write-back D$ | ideal 1-cycle memory |
 |---|---|---|---|---|
 | crc32  | 11.36 | 2.60 | **2.31** | 1.17 |
@@ -85,6 +100,7 @@ This current benchmark matrix covers five C kernels, each also compiled for the 
 | sort   | 12.48 | 5.14 | **2.50** | 1.25 |
 | llist  | 10.00 | 4.99 | **2.02** | 1.00 |
 | interp | 11.88 | 3.63 | **2.38** | 1.19 |
+<!-- portfolio:benchmarks:end -->
 
 `crc32` is a tight bitwise loop, `matmul` a 16×16 integer multiply, `sort` a data-dependent bubble sort, `llist` a deliberately cache-hostile pointer chase, `interp` a stack-machine interpreter with a real instruction footprint.
 
@@ -98,6 +114,7 @@ Three findings from the geometry sweeps (measured pre-BRAM-rework; the qualitati
 
 ## Verification
 
+<!-- portfolio:verification:start -->
 | Mechanism | Coverage |
 |---|---|
 | Directed tests | 25, one per hazard/instruction-class/trap/predictor scenario; `tohost` end-of-test |
@@ -108,6 +125,7 @@ Three findings from the geometry sweeps (measured pre-BRAM-rework; the qualitati
 | Functional coverage | 44/44 source cover points hit (100%) — [`docs/coverage.md`](docs/coverage.md) |
 | Constrained-random | 1000 seeds vs. a Python model (ALU/load-store); **200 seeds vs. Spike** with branches/jumps, per-retirement, in CI |
 | Lint | `verilator -Wall` clean, waivers justified in [`rtl/verilator.vlt`](rtl/verilator.vlt) |
+<!-- portfolio:verification:end -->
 
 See [`docs/VERIFICATION_PLAN.md`](docs/VERIFICATION_PLAN.md) for what each mechanism catches and what it explicitly doesn't.
 

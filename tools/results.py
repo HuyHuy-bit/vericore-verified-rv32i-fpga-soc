@@ -380,7 +380,12 @@ def validate_manifest(result: ResultSet, errors: list[str], architecture_expecte
                 errors.append(f"manifest expected {key} must be {expected_value}")
 
 
-def validate_verification(result: ResultSet, errors: list[str], architecture_expected: int) -> None:
+def validate_verification(
+    result: ResultSet,
+    errors: list[str],
+    architecture_expected: int,
+    harness_expected: int,
+) -> None:
     value = result.verification
     if not exact_fields(value, VERIFICATION_FIELDS, "verification", errors):
         return
@@ -392,12 +397,15 @@ def validate_verification(result: ResultSet, errors: list[str], architecture_exp
     exact_counts = {
         "decoder_vectors": 2120,
         "hazard_vectors": 262144,
-        "harness_tests": 106,
         "directed_programs": 25,
     }
     for key, expected in exact_counts.items():
         if value[key] != expected:
             errors.append(f"verification {key} must be {expected}")
+    if value["harness_tests"] != harness_expected:
+        errors.append(
+            f"verification harness test count must match current source ({harness_expected})"
+        )
     if exact_fields(value["assertions"], {"concurrent", "immediate"}, "assertions", errors):
         if value["assertions"] != {"concurrent": 25, "immediate": 2}:
             errors.append("assertion counts must be 25 concurrent and 2 immediate")
@@ -663,8 +671,15 @@ def validate_result_set(root: Path, checkout: Path) -> list[str]:
     architecture_expected = int(expected_text) if UINT_RE.fullmatch(expected_text) else 0
     if architecture_expected <= 0:
         errors.append("ARCH_TEST_EXPECTED must be a positive canonical integer")
+    try:
+        harness_expected = harness_test_count(
+            checkout.resolve() / "tools" / "test_harness.py"
+        )
+    except (OSError, SyntaxError) as exc:
+        errors.append(f"cannot derive harness test count: {exc}")
+        harness_expected = -1
     validate_manifest(result, errors, architecture_expected)
-    validate_verification(result, errors, architecture_expected)
+    validate_verification(result, errors, architecture_expected, harness_expected)
     validate_benchmarks(result, errors)
     validate_synthesis(result, errors)
     validate_tools(result, checkout.resolve(), errors)

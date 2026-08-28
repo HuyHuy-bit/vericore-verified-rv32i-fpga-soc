@@ -56,6 +56,12 @@ class ResultSetTest(unittest.TestCase):
             "VERIFY_IMAGE_REVISION=1\n",
             encoding="utf-8",
         )
+        (self.checkout / "tools/test_harness.py").write_text(
+            "class HarnessTests:\n"
+            "    def test_first(self): pass\n"
+            "    def test_second(self): pass\n",
+            encoding="utf-8",
+        )
         self.write_fixture()
 
     def tearDown(self) -> None:
@@ -81,7 +87,7 @@ class ResultSetTest(unittest.TestCase):
             "status": "complete",
             "decoder_vectors": 2120,
             "hazard_vectors": 262144,
-            "harness_tests": 106,
+            "harness_tests": 2,
             "assertions": {"concurrent": 25, "immediate": 2},
             "cover_points": {"source": 44, "hit": 44},
             "directed_programs": 25,
@@ -292,6 +298,18 @@ class ResultSetTest(unittest.TestCase):
         self.write_json("verification.json", value)
         self.refresh_manifest()
         self.assertTrue(any("unknown field" in error for error in validate_result_set(self.results, self.checkout)))
+
+    def test_harness_count_must_match_the_current_test_source(self) -> None:
+        value = self.verification()
+        value["harness_tests"] = 3
+        self.write_json("verification.json", value)
+        self.refresh_manifest()
+        self.assertTrue(
+            any(
+                "harness test count" in error
+                for error in validate_result_set(self.results, self.checkout)
+            )
+        )
 
     def test_duplicate_csv_heading_is_rejected(self) -> None:
         path = self.results / "benchmarks.csv"

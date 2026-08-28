@@ -15,6 +15,8 @@ import tempfile
 import textwrap
 import unittest
 
+from tools.evidence_check import ContractError, check_published_portfolio
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "tools/evidence_check.py"
@@ -23,6 +25,23 @@ APPROVED_REFERENCES = {
     "ARCH_TEST_EXPECTED": "38",
     "SPIKE_SHA": "55b4658dbf574ba0b714083ec436ce2cb5be1998",
 }
+
+
+class PublishedPortfolioTest(unittest.TestCase):
+    def test_media_can_be_absent_while_recording_the_first_artifact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="rv32i-published-evidence-") as directory:
+            root = Path(directory)
+            (root / "results").mkdir()
+            for name in (
+                "manifest.json", "verification.json", "benchmarks.csv",
+                "synthesis.csv", "tool_versions.json",
+            ):
+                (root / "results" / name).write_text("fixture\n", encoding="utf-8")
+            check_published_portfolio(
+                root,
+                record_validator=lambda result_root, checkout: [],
+                document_checker=lambda checkout: [],
+            )
 
 
 class EvidenceContractTest(unittest.TestCase):
@@ -439,6 +458,17 @@ class EvidenceContractTest(unittest.TestCase):
         source = source.replace(
             "      - name: Run three predictor configurations\n"
             "        run: python3 tools/verification.py container --profile directed-predictor\n",
+            "",
+        )
+        path.write_text(source, encoding="utf-8")
+        self.assert_contract_failure("commands are not canonical")
+
+    def test_container_workflow_rejects_a_missing_portfolio_media_profile(self) -> None:
+        self.use_container_workflows()
+        path = self.repo / ".github/workflows/rtl-tests.yml"
+        source = path.read_text(encoding="utf-8").replace(
+            "      - name: Validate committed portfolio artifacts\n"
+            "        run: python3 tools/verification.py container --profile portfolio\n",
             "",
         )
         path.write_text(source, encoding="utf-8")
@@ -1004,6 +1034,11 @@ class EvidenceContractTest(unittest.TestCase):
         result = self.run_evidence_checker()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("repository evidence: OK", result.stdout)
+
+    def test_partial_result_set_is_rejected(self) -> None:
+        self.write_evidence_tree()
+        self.write("results/manifest.json", "{}\n")
+        self.assert_evidence_failure("result records are incomplete")
 
     def test_directed_test_requires_source_and_reference_pair(self) -> None:
         self.write_evidence_tree()

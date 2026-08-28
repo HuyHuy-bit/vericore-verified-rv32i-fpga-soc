@@ -14,6 +14,7 @@ SPIKE="${SPIKE/#\~/$HOME}"
 SIM="${SIM:-$REPO_ROOT/obj_dir_lockstep/Vcpu}"
 CYCLES="${CYCLES:-4000}"
 LOCKSTEP_TIMEOUT="${LOCKSTEP_TIMEOUT:-300}"
+LOCKSTEP_CASE="${LOCKSTEP_CASE:-}"
 SRC_DIR="$ARCH_TEST/riscv-test-suite/rv32i_m/I/src"
 WORK_DIR=""
 
@@ -103,6 +104,18 @@ DISCOVERED=${#SOURCES[@]}
 [ "$DISCOVERED" -gt 0 ] || die "no lockstep sources discovered in $SRC_DIR"
 [ "$DISCOVERED" -eq "$ARCH_TEST_EXPECTED" ] \
     || die "discovered $DISCOVERED lockstep cases; expected $ARCH_TEST_EXPECTED"
+RUN_SOURCES=("${SOURCES[@]}")
+if [ -n "$LOCKSTEP_CASE" ]; then
+    [[ "$LOCKSTEP_CASE" =~ ^[A-Za-z0-9_.-]+$ ]] \
+        || die "LOCKSTEP_CASE is malformed"
+    RUN_SOURCES=()
+    for src in "${SOURCES[@]}"; do
+        [ "$(basename "$src" .S)" = "$LOCKSTEP_CASE" ] && RUN_SOURCES+=("$src")
+    done
+    [ "${#RUN_SOURCES[@]}" -eq 1 ] \
+        || die "requested lockstep case not found: $LOCKSTEP_CASE"
+fi
+RUN_EXPECTED=${#RUN_SOURCES[@]}
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-lockstep-suite.XXXXXX") \
     || die "could not create lockstep suite directory"
@@ -110,7 +123,7 @@ PASS=0
 FAIL=0
 FAILED=()
 
-for src in "${SOURCES[@]}"; do
+for src in "${RUN_SOURCES[@]}"; do
     name=$(basename "$src" .S)
     case_dir="$WORK_DIR/$name"
     mkdir -p "$case_dir"
@@ -147,8 +160,8 @@ for src in "${SOURCES[@]}"; do
 done
 
 echo
-echo "========== $PASS/$DISCOVERED programs match Spike instruction-for-instruction =========="
+echo "========== $PASS/$RUN_EXPECTED programs match Spike instruction-for-instruction =========="
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "Failed: ${FAILED[*]}"
 fi
-[ "$FAIL" -eq 0 ] && [ "$PASS" -eq "$ARCH_TEST_EXPECTED" ]
+[ "$FAIL" -eq 0 ] && [ "$PASS" -eq "$RUN_EXPECTED" ]

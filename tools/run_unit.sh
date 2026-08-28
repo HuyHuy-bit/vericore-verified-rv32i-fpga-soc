@@ -8,8 +8,13 @@ fi
 
 top=$1
 shift
-build_dir="obj_dir_unit_${top%_tb}"
+[[ "$top" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+    echo "invalid top module: $top" >&2
+    exit 2
+}
+unit_build_dir=$(mktemp -d "${TMPDIR:-/tmp}/rv32i-unit-${top}.XXXXXX")
+trap 'rm -rf -- "$unit_build_dir"' EXIT
 
 verilator --binary --assert --timing -j 0 \
-    --Mdir "$build_dir" --top-module "$top" "$@"
-"./$build_dir/V$top"
+    --Mdir "$unit_build_dir" --top-module "$top" "$@"
+"$unit_build_dir/V$top"

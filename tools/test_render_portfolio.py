@@ -30,10 +30,10 @@ class PortfolioRendererTest(unittest.TestCase):
 
     def write_documents(self) -> None:
         blocks = {
-            "README.md": ("snapshot", "verification", "benchmarks", "synthesis"),
+            "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
             "docs/EVIDENCE.md": ("facts", "verification", "benchmarks", "synthesis", "provenance"),
-            "docs/MICROARCHITECTURE.md": ("benchmarks", "synthesis"),
-            "docs/VERIFICATION_PLAN.md": ("summary",),
+            "docs/MICROARCHITECTURE.md": ("facts", "benchmarks", "synthesis"),
+            "docs/VERIFICATION_PLAN.md": ("facts", "summary"),
         }
         for relative, names in blocks.items():
             body = [f"# {relative}", ""]
@@ -142,7 +142,13 @@ class PortfolioRendererTest(unittest.TestCase):
             self.root / "docs/VERIFICATION_PLAN.md",
         })
         self.assertIn("25 directed tests × 6 memory configurations", rendered[self.root / "README.md"])
+        self.assertIn("66.7–83.3 MHz routed Artix-7 implementations", rendered[self.root / "README.md"])
+        self.assertIn("RISC-V assembler 2.42", rendered[self.root / "README.md"])
         self.assertIn("38/38", rendered[self.root / "docs/EVIDENCE.md"])
+        for value in rendered.values():
+            self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
+            self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
+            self.assertFalse(any(line != line.rstrip() for line in value.splitlines()))
         self.assertNotIn("\nstale\n", "".join(rendered.values()))
 
     def test_check_detects_stale_content_and_write_is_idempotent(self) -> None:

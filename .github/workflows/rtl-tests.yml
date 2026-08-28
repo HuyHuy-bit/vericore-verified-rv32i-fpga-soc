@@ -54,3 +54,6 @@ jobs:
 
       - name: Run three predictor configurations
         run: python3 tools/verification.py container --profile directed-predictor
+
+      - name: Validate committed portfolio artifacts
+        run: python3 tools/verification.py container --profile portfolio

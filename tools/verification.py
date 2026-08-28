@@ -193,13 +193,14 @@ def docker_run_command(
     uid: int | None = None,
     gid: int | None = None,
     receipt: Path | None = None,
+    command: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
     commands_for(profile, root)
     values = load_manifest(root / "tools" / "tool_versions.env")
     cache = root.resolve() / ".verify-cache"
     user_id = os.getuid() if uid is None else uid
     group_id = os.getgid() if gid is None else gid
-    command = (
+    invocation = (
         "docker", "run", "--rm",
         "--env", f"HOST_UID={user_id}",
         "--env", f"HOST_GID={group_id}",
@@ -210,13 +211,19 @@ def docker_run_command(
         "--volume", f"{cache}:/opt/rv32i-cache",
         "--workdir", "/work",
         image_name(values, target),
+    )
+    if command is not None:
+        if not command:
+            raise VerificationError("container command must not be empty")
+        return invocation + command
+    invocation += (
         "python3", "tools/verification.py", "run",
         "--profile", profile,
         "--inside-container", "1",
     )
     if receipt is not None:
-        command += ("--receipt", str(receipt))
-    return command
+        invocation += ("--receipt", str(receipt))
+    return invocation
 
 
 def invoke(command: Sequence[str], root: Path, timeout: int) -> int:
@@ -230,6 +237,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--target", choices=("verify", "demo"), default="verify")
     parser.add_argument("--inside-container", choices=("0", "1"), default="0")
     parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--command", nargs=argparse.REMAINDER)
     return parser.parse_args(argv)
 
 
@@ -261,6 +269,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 write_verification_receipt(root, receipt)
                 print(f"wrote verification receipt: {receipt}")
             return status
+        if args.command is not None and args.mode != "container":
+            raise VerificationError("explicit commands require container mode")
+        if args.receipt is not None and args.command is not None:
+            raise VerificationError("explicit commands cannot produce verification receipts")
         if args.receipt is not None and args.mode == "image":
             raise VerificationError("image builds do not produce verification receipts")
         build = build_image_command(root, args.target)
@@ -270,7 +282,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         (root / ".verify-cache").mkdir(exist_ok=True)
         return invoke(
-            docker_run_command(root, args.profile, args.target, receipt=args.receipt),
+            docker_run_command(
+                root, args.profile, args.target, receipt=args.receipt,
+                command=tuple(args.command) if args.command is not None else None,
+            ),
             root,
             86400,
         )
