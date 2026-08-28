@@ -16,7 +16,7 @@ else:
 
 DOCUMENT_BLOCKS = {
     "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-    "docs/EVIDENCE.md": ("facts", "verification", "benchmarks", "synthesis", "provenance"),
+    "docs/EVIDENCE.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
     "docs/MICROARCHITECTURE.md": ("facts", "benchmarks", "synthesis"),
     "docs/VERIFICATION_PLAN.md": ("facts", "summary"),
 }
@@ -160,6 +160,53 @@ def provenance(result: ResultSet) -> str:
     ))
 
 
+def evidence_overview(result: ResultSet) -> str:
+    tools = result.tool_versions
+    synth = result.synthesis[0]
+    container = tools["container"]
+    return "\n\n".join((
+        (
+            "This ledger separates source-derived facts, pinned external inputs, "
+            "current measurements, and historical design studies. Open-source gates "
+            f"were measured at `{result.verification['measured_at']}`; the compact "
+            f"result set was published at `{result.manifest['measured_at']}`; Vivado "
+            f"manifests record `{synth['measurement_date']}`. The tooling commit is "
+            f"`{result.manifest['tooling_commit']}`, and the frozen RTL baseline is "
+            f"`{result.manifest['rtl_commit']}`."
+        ),
+        (
+            f"The pinned environment is Ubuntu {tools['ubuntu']} in "
+            f"`{container['image']}:{container['revision']}` "
+            f"(`{container['digest']}`), Verilator {tools['verilator']}, Python "
+            f"{tools['python']}, RISC-V GCC {tools['riscv_gcc']} with assembler "
+            f"{tools['riscv_as']}, Spike `{tools['spike_commit']}`, architecture tests "
+            f"`{tools['architecture_test_commit']}`, and Vivado "
+            f"{synth['vivado_version']} build {synth['vivado_build']}."
+        ),
+    ))
+
+
+def synthesis_hashes(result: ResultSet) -> str:
+    labels = {
+        "core": "core",
+        "icache": "I$",
+        "dcache-wt": "D$ write-through",
+        "dcache-wb": "D$ write-back",
+    }
+    lines = [
+        "The SHA-256 pairs below are `utilization.rpt` / `timing_summary.rpt`:",
+        "",
+        "| Configuration | Report hashes |",
+        "|---|---|",
+    ]
+    for row in result.synthesis:
+        lines.append(
+            f"| {labels[row['configuration']]} | `{row['utilization_sha256']}` / "
+            f"`{row['timing_sha256']}` |"
+        )
+    return "\n".join(lines)
+
+
 def summary(result: ResultSet) -> str:
     value = result.verification
     user = value["coverage"]["user"]
@@ -176,10 +223,12 @@ def summary(result: ResultSet) -> str:
 
 def block_contents(result: ResultSet) -> dict[str, str]:
     return {
+        "overview": evidence_overview(result),
         "snapshot": snapshot(result),
         "verification": verification_table(result),
         "benchmarks": benchmark_table(result),
         "synthesis": synthesis_table(result),
+        "synthesis-hashes": synthesis_hashes(result),
         "facts": facts(result),
         "provenance": provenance(result),
         "summary": summary(result),

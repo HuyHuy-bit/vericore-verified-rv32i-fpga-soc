@@ -28,14 +28,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 </details>
 
 <!-- portfolio:summary:start -->
-| Mechanism | Scale | What it uniquely catches |
-|---|---|---|
-| Directed tests | 25 programs × 6 cache configs | The specific hazard/trap each was written for |
-| Compliance suite | 38/38 `rv32i_m/I` | ISA conformance the author wouldn't think to target |
-| Spike lockstep | 38 programs, instruction-by-instruction | Right answer reached by the *wrong path* |
-| Assertions | 25 concurrent properties + 2 immediate checks | Invariant violations, in any test, immediately |
-| Functional coverage | 44/44 source points hit (100%) | Instrumented scenarios |
-| Constrained-random | 1000 seeds vs. a Python model; 200 vs. Spike | Blind spots of whoever wrote the directed tests |
+The release gate runs 25 programs across 6 memory configurations and 3 predictor configurations. Pinned architecture signatures and complete Spike traces both pass 38/38; random Spike lockstep passes 200/200; functional coverage is 44/44 (100.0%).
 <!-- portfolio:summary:end -->
 
 ## Directed tests (`tests/`, run via `make all`)

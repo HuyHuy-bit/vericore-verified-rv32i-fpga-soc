@@ -140,7 +140,13 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 ## Performance results
 
 <!-- portfolio:benchmarks:start -->
-See the README's [Performance](../README.md#performance) section for the full CPI table and the three sweep findings (block-size/hit-rate inversion, write-back's non-uniform win, and `llist`'s non-monotonic block-size behavior).
+| Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
+|---|---:|---:|---:|---:|
+| crc32 | 758,160 / 10.28041 | 170,189 / 2.30771 | 152,285 / 2.06494 | 75,816 / 1.02804 |
+| matmul | 3,504,148 / 11.37629 | 790,915 / 2.56772 | 712,507 / 2.31317 | 361,402 / 1.17330 |
+| sort | 2,521,060 / 12.48334 | 1,038,506 / 5.14229 | 504,874 / 2.49995 | 252,106 / 1.24833 |
+| llist | 932,270 / 10.00236 | 465,099 / 4.99006 | 188,643 / 2.02396 | 93,227 / 1.00024 |
+| interp | 14,652,250 / 11.69906 | 4,443,716 / 3.54808 | 2,933,372 / 2.34214 | 1,467,250 / 1.17152 |
 <!-- portfolio:benchmarks:end -->
 
 ## Synthesis
@@ -148,12 +154,12 @@ See the README's [Performance](../README.md#performance) section for the full CP
 The current four-route matrix uses Vivado 2025.2, `xc7a35ticsg324-1L`, a 2 ns constraint, and 512-word backing memories. Exact source identity and report hashes are tracked in [`EVIDENCE.md`](EVIDENCE.md).
 
 <!-- portfolio:synthesis:start -->
-| Config | Result | fmax | WNS | LUT | FF | BRAM tiles |
-|---|---|---:|---:|---:|---:|---:|
-| core only (no caches) | Routed | 76.272 MHz | −11.111 ns | 4,031 / 20,800 (19.4%) | 5,220 / 41,600 (12.5%) | 0.5 / 50 |
-| + 1KB I-cache (4-way) | Routed | 73.730 MHz | −11.563 ns | 5,011 / 20,800 (24.1%) | 6,970 / 41,600 (16.8%) | 2 / 50 |
-| + 4KB D-cache, write-through | Routed | 70.562 MHz | −12.172 ns | 8,800 / 20,800 (42.3%) | 13,527 / 41,600 (32.5%) | 4 / 50 |
-| + 4KB D-cache, write-back | Routed | 71.839 MHz | −11.920 ns | 9,218 / 20,800 (44.3%) | 13,517 / 41,600 (32.5%) | 4 / 50 |
+| Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |
+|---|---:|---:|---:|---:|---:|---:|
+| Core | 4,031 | 5,220 | 0.5 | -11.111 | 13.111 | 76.272 |
+| +1KB 4-way I$ | 5,011 | 6,970 | 2.0 | -11.563 | 13.563 | 73.730 |
+| +4KB 4-way WT D$ | 8,800 | 13,527 | 4.0 | -12.172 | 14.172 | 70.562 |
+| +4KB 4-way WB D$ | 9,218 | 13,517 | 4.0 | -11.920 | 13.920 | 71.839 |
 <!-- portfolio:synthesis:end -->
 
 The current comparison shows two direct costs:

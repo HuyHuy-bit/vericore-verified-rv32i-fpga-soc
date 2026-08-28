@@ -36,7 +36,15 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 <!-- portfolio:snapshot:end -->
 
 <!-- portfolio:provenance:start -->
-- Current evidence provenance is recorded in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+- Measurement timestamp: `2026-08-28T13:46:38Z`
+- Tooling commit: `031fcd07c45b9fe59f6951fd0bafda275e6ce0d0`
+- Frozen RTL commit: `3c7e84e392b345332d6acdd0ed899928dafb1058`
+- Canonical container: `ghcr.io/huyhuy-bit/rv32i-verify:1`
+- Open tools: Ubuntu 24.04; Verilator 5.048; RISC-V GCC 13.2.0-2024.04.12; RISC-V assembler 2.42; Python 3.12
+- Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-28
+- Reproduce verification: `make verify`
+- Reproduce benchmarks: `make bench` with the recorded headline configuration
+- Reproduce implementation: `make synth-matrix && make synth-summary`
 <!-- portfolio:provenance:end -->
 
 ![Portfolio verification demo](docs/portfolio-demo.gif)
@@ -65,12 +73,12 @@ Next-PC priority: `freeze > trap > mispredict > load-use stall > predict > +4`. 
 This current Vivado 2025.2 matrix uses `xc7a35ticsg324-1L`, 512-word backing memories, and a deliberately aggressive 2 ns constraint. `fmax` is calculated from the routed critical path; the negative WNS values make clear that none of these configurations closes at 500 MHz. Exact commits, commands, and report hashes are in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 <!-- portfolio:synthesis:start -->
-| Config | fmax | WNS | LUT | FF | BRAM tiles |
-|---|---:|---:|---:|---:|---:|
-| core only | 76.272 MHz | −11.111 ns | 4,031 (19.4%) | 5,220 (12.5%) | 0.5 |
-| + 1KB I$ (4-way) | 73.730 MHz | −11.563 ns | 5,011 (24.1%) | 6,970 (16.8%) | 2 |
-| + 4KB D$ write-through | 70.562 MHz | −12.172 ns | 8,800 (42.3%) | 13,527 (32.5%) | 4 |
-| + 4KB D$ write-back | 71.839 MHz | −11.920 ns | 9,218 (44.3%) | 13,517 (32.5%) | 4 |
+| Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |
+|---|---:|---:|---:|---:|---:|---:|
+| Core | 4,031 | 5,220 | 0.5 | -11.111 | 13.111 | 76.272 |
+| +1KB 4-way I$ | 5,011 | 6,970 | 2.0 | -11.563 | 13.563 | 73.730 |
+| +4KB 4-way WT D$ | 8,800 | 13,527 | 4.0 | -12.172 | 14.172 | 70.562 |
+| +4KB 4-way WB D$ | 9,218 | 13,517 | 4.0 | -11.920 | 13.920 | 71.839 |
 <!-- portfolio:synthesis:end -->
 
 The current write-back policy costs 418 LUT over write-through while using the same four BRAM tiles. The full hierarchy still fits below 45% LUT and 33% flip-flop utilization. Historical inference experiments below explain how the cache arrays reached Block RAM; they are retained as design studies, not mixed into the current headline matrix.
@@ -93,13 +101,13 @@ The core-only row dropped from an earlier 79.2 MHz once interrupt support added 
 This current benchmark matrix covers five C kernels, each also compiled for the host so a wrong CPU result fails instead of quietly skewing CPI. The first three columns use 10-cycle instruction/data memory; the final column uses ideal one-cycle memory. It was measured on the frozen RTL in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 <!-- portfolio:benchmarks:start -->
-| kernel | no caches | +1KB I$ | +4KB write-back D$ | ideal 1-cycle memory |
-|---|---|---|---|---|
-| crc32  | 11.36 | 2.60 | **2.31** | 1.17 |
-| matmul | 11.39 | 2.58 | **2.32** | 1.18 |
-| sort   | 12.48 | 5.14 | **2.50** | 1.25 |
-| llist  | 10.00 | 4.99 | **2.02** | 1.00 |
-| interp | 11.88 | 3.63 | **2.38** | 1.19 |
+| Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
+|---|---:|---:|---:|---:|
+| crc32 | 758,160 / 10.28041 | 170,189 / 2.30771 | 152,285 / 2.06494 | 75,816 / 1.02804 |
+| matmul | 3,504,148 / 11.37629 | 790,915 / 2.56772 | 712,507 / 2.31317 | 361,402 / 1.17330 |
+| sort | 2,521,060 / 12.48334 | 1,038,506 / 5.14229 | 504,874 / 2.49995 | 252,106 / 1.24833 |
+| llist | 932,270 / 10.00236 | 465,099 / 4.99006 | 188,643 / 2.02396 | 93,227 / 1.00024 |
+| interp | 14,652,250 / 11.69906 | 4,443,716 / 3.54808 | 2,933,372 / 2.34214 | 1,467,250 / 1.17152 |
 <!-- portfolio:benchmarks:end -->
 
 `crc32` is a tight bitwise loop, `matmul` a 16×16 integer multiply, `sort` a data-dependent bubble sort, `llist` a deliberately cache-hostile pointer chase, `interp` a stack-machine interpreter with a real instruction footprint.
@@ -115,16 +123,18 @@ Three findings from the geometry sweeps (measured pre-BRAM-rework; the qualitati
 ## Verification
 
 <!-- portfolio:verification:start -->
-| Mechanism | Coverage |
-|---|---|
-| Directed tests | 25, one per hazard/instruction-class/trap/predictor scenario; `tohost` end-of-test |
-| Compliance | `riscv-arch-test` `rv32i_m/I` — **38/38** |
-| Spike lockstep | Same 38, compared instruction-by-instruction — **38/38** |
-| CI matrix | Directed suite × 6 cache/latency configs per push; result must be invariant to cache config |
-| Assertions | 27 total: 25 concurrent SVA properties and 2 immediate hazard assertions |
-| Functional coverage | 44/44 source cover points hit (100%) — [`docs/coverage.md`](docs/coverage.md) |
-| Constrained-random | 1000 seeds vs. a Python model (ALU/load-store); **200 seeds vs. Spike** with branches/jumps, per-retirement, in CI |
-| Lint | `verilator -Wall` clean, waivers justified in [`rtl/verilator.vlt`](rtl/verilator.vlt) |
+| Gate | Result |
+|---|---:|
+| Decoder unit vectors | 2,120/2,120 |
+| Hazard unit vectors | 262,144/262,144 |
+| Harness tests | 109/109 |
+| Directed memory matrix | 150/150 |
+| Predictor matrix | 75/75 |
+| Architecture signatures | 38/38 |
+| Architecture Spike lockstep | 38/38 |
+| Python-model random | 2000/2000 |
+| Random Spike lockstep | 200/200 |
+| Functional cover points | 44/44 |
 <!-- portfolio:verification:end -->
 
 See [`docs/VERIFICATION_PLAN.md`](docs/VERIFICATION_PLAN.md) for what each mechanism catches and what it explicitly doesn't.

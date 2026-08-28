@@ -1,16 +1,10 @@
 # Evidence ledger
 
-This ledger separates source-derived facts, pinned external inputs, current
-measurements, and historical design studies. Simulation and benchmark results
-were collected on 2026-08-26 local time; Vivado manifests record 2026-08-27
-UTC. The source/tooling commit is
-`7a34fc7e292365915687040ad1db549a2dfdb754`, and the frozen RTL baseline is
-`c0a95a3a4a33d3f5611f017cb9b8c454f1d13319`.
+<!-- portfolio:overview:start -->
+This ledger separates source-derived facts, pinned external inputs, current measurements, and historical design studies. Open-source gates were measured at `2026-08-28T03:34:50Z`; the compact result set was published at `2026-08-28T13:46:38Z`; Vivado manifests record `2026-08-28`. The tooling commit is `031fcd07c45b9fe59f6951fd0bafda275e6ce0d0`, and the frozen RTL baseline is `3c7e84e392b345332d6acdd0ed899928dafb1058`.
 
-The host was Ubuntu 22.04.5 under WSL2. Tools were Verilator 5.048
-(`v5.048-56-gc233a3905`), Python 3.10.12, RISC-V GCC 10.2.0 with GNU assembler
-2.35.1, pinned Spike `55b4658dbf574ba0b714083ec436ce2cb5be1998`, and
-Vivado 2025.2 build 6299465.
+The pinned environment is Ubuntu 24.04 in `ghcr.io/huyhuy-bit/rv32i-verify:1` (`sha256:c5e3ca79ff535e1399e2a57753d8103d789172531a58c8ff420b502697790e81`), Verilator 5.048, Python 3.12, RISC-V GCC 13.2.0-2024.04.12 with assembler 2.42, Spike `55b4658dbf574ba0b714083ec436ce2cb5be1998`, architecture tests `6f7f47bdc61c0c51c0cbf75789678a1235eeefc2`, and Vivado 2025.2 build 6299465.
+<!-- portfolio:overview:end -->
 
 ## Machine-checked facts
 
@@ -41,16 +35,18 @@ central reference metadata by `make evidence-check`.
 ## Current verification measurements
 
 <!-- portfolio:verification:start -->
-| Evidence | Command or configuration | Result |
-|---|---|---|
-| Fast correctness | `make check` | Pass: decoder 2,120 cases; hazard 262,144 cases; harness 102 tests; lint and evidence checks clean |
-| Directed simulation | `make test` in baseline, slow-memory, I$-only, write-through, write-back, and associative configurations | 25/25 in each; 150/150 total |
-| Python-model random | `make soak SEEDS=1000` | 1,000/1,000 baseline |
-| Python-model random, cached | `make soak SEEDS=1000 IC_BYTES=1024 IC_WAYS=4 DC_BYTES=4096 DC_WAYS=4 DC_WB=1` | 1,000/1,000 |
-| Architecture signatures | `make compliance` | 38/38 against pinned `riscv-arch-test` |
-| Spike architecture lockstep | `make lockstep` | 38/38 complete retirement traces |
-| Spike random lockstep | `make soak-lockstep SEEDS=200` | 200/200, 60 generated instructions per seed |
-| Functional coverage | `make coverage` | user 44/44 (100%); line 260/278; branch 186/198; expression 202/221 |
+| Gate | Result |
+|---|---:|
+| Decoder unit vectors | 2,120/2,120 |
+| Hazard unit vectors | 262,144/262,144 |
+| Harness tests | 109/109 |
+| Directed memory matrix | 150/150 |
+| Predictor matrix | 75/75 |
+| Architecture signatures | 38/38 |
+| Architecture Spike lockstep | 38/38 |
+| Python-model random | 2000/2000 |
+| Random Spike lockstep | 200/200 |
+| Functional cover points | 44/44 |
 <!-- portfolio:verification:end -->
 
 The six directed configurations were baseline; `IMEM_LAT=10 DMEM_LAT=10`;
@@ -64,13 +60,13 @@ Each row below passed its host-oracle result check. `make bench` selected the
 exact simulator built for the listed parameters.
 
 <!-- portfolio:benchmarks:start -->
-| Kernel | 10-cycle, uncached | +1KB 4-way I$ | +4KB 4-way write-back D$ | 1-cycle, uncached |
+| Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
 |---|---:|---:|---:|---:|
-| crc32 | 699,094 cycles / 11.3618 CPI | 160,026 / 2.60078 | 142,114 / 2.30967 | 71,776 / 1.16652 |
-| matmul | 3,463,179 / 11.3948 | 782,697 / 2.57529 | 704,262 / 2.31722 | 357,306 / 1.17563 |
-| sort | 2,521,051 / 12.4833 | 1,038,463 / 5.14208 | 504,847 / 2.49981 | 252,106 / 1.24833 |
-| llist | 932,261 / 10.0023 | 465,080 / 4.98986 | 188,616 / 2.02367 | 93,227 / 1.00024 |
-| interp | 14,644,581 / 11.8821 | 4,474,900 / 3.63078 | 2,930,114 / 2.37740 | 1,464,459 / 1.18821 |
+| crc32 | 758,160 / 10.28041 | 170,189 / 2.30771 | 152,285 / 2.06494 | 75,816 / 1.02804 |
+| matmul | 3,504,148 / 11.37629 | 790,915 / 2.56772 | 712,507 / 2.31317 | 361,402 / 1.17330 |
+| sort | 2,521,060 / 12.48334 | 1,038,506 / 5.14229 | 504,874 / 2.49995 | 252,106 / 1.24833 |
+| llist | 932,270 / 10.00236 | 465,099 / 4.99006 | 188,643 / 2.02396 | 93,227 / 1.00024 |
+| interp | 14,652,250 / 11.69906 | 4,443,716 / 3.54808 | 2,933,372 / 2.34214 | 1,467,250 / 1.17152 |
 <!-- portfolio:benchmarks:end -->
 
 Commands were `make bench IMEM_LAT=10 DMEM_LAT=10`; the same with
@@ -85,27 +81,35 @@ constraint is intentionally aggressive; all WNS values are negative, so these
 are routed critical-path estimates rather than timing closure claims.
 
 <!-- portfolio:synthesis:start -->
-| Configuration | LUT | FF | BRAM tiles | WNS | Critical path | fmax |
+| Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |
 |---|---:|---:|---:|---:|---:|---:|
-| core | 4,031 | 5,220 | 0.5 | −11.111 ns | 13.111 ns | 76.272 MHz |
-| 1KB four-way I$ | 5,011 | 6,970 | 2 | −11.563 ns | 13.563 ns | 73.730 MHz |
-| +4KB four-way write-through D$ | 8,800 | 13,527 | 4 | −12.172 ns | 14.172 ns | 70.562 MHz |
-| +4KB four-way write-back D$ | 9,218 | 13,517 | 4 | −11.920 ns | 13.920 ns | 71.839 MHz |
+| Core | 4,031 | 5,220 | 0.5 | -11.111 | 13.111 | 76.272 |
+| +1KB 4-way I$ | 5,011 | 6,970 | 2.0 | -11.563 | 13.563 | 73.730 |
+| +4KB 4-way WT D$ | 8,800 | 13,527 | 4.0 | -12.172 | 14.172 | 70.562 |
+| +4KB 4-way WB D$ | 9,218 | 13,517 | 4.0 | -11.920 | 13.920 | 71.839 |
 <!-- portfolio:synthesis:end -->
 
-The ignored manifests bind every route to the source and RTL commits above.
+<!-- portfolio:synthesis-hashes:start -->
 The SHA-256 pairs below are `utilization.rpt` / `timing_summary.rpt`:
 
 | Configuration | Report hashes |
 |---|---|
-| core | `8678a9ac835a8fb3b627da56d5966fba9628b8750acd319e971abd92378fb4ef` / `707ff217af00e4911d21d21391a4bbf6d6dff7a39dee27a18ff22db7318686e7` |
-| I$ | `9c4ccc72945626942e635035a2738b4d868243901b71172dc017ed976ab2fd96` / `a49b9623d1b362e7b96802c9fdf78ad7d2b4e8fd783a3163c798a9a8bb877d90` |
-| D$ write-through | `145fb0856275c4390bbe067c33fee4913ecc958ef55793feceb5c5739013404c` / `0ec010407093f5571264a3322992ab9ccbb19538ee178014478e9f29eaa09f0f` |
-| D$ write-back | `61701ff07c81611f25774c1b81c0e79479d666be32c4b09dd23262119b0d5f8d` / `d9e6a7b376809d8520df9e2f5c3953c19c8da5fe415e353427ca3f93f5fef219` |
+| core | `4c83d1366b6706a20d9a2cc8276c0ad96ccd55f1a3e8a40d915026ad3fb4a419` / `4da3b45e91d44fbcf1a12d12737e61bf4512b6a6a2c6f88cdf098bb910a5c278` |
+| I$ | `2ec3f5376634a8321ef2de183a8b5ca86ad8a3483fc4ed88f50cf3d943cc72b7` / `a1da34c85b579621966b1e89dd60248a8c63f080734aa53ad26d2e6cf5138acf` |
+| D$ write-through | `4544fbf9ccad5ca1f62d9cd216abebe063afc0ffe68b6e0df8c2795ae2a359e2` / `942c1dda0a2ce3f0c76a909b70f30941b9e4f83519e75ec06b5483d363f6c5ba` |
+| D$ write-back | `e8994c085b2b91f16df7b92be791a9bc50468264387c8d389f5f84d55c42d9a6` / `3834c564c2dcf047d40a5bd4678bf089e2d235044f54d6d1100f6010a6f5d9bb` |
+<!-- portfolio:synthesis-hashes:end -->
 
 <!-- portfolio:provenance:start -->
-- Reproduce verification with `make verify`.
-- Reproduce implementation with `make synth-matrix && make synth-summary`.
+- Measurement timestamp: `2026-08-28T13:46:38Z`
+- Tooling commit: `031fcd07c45b9fe59f6951fd0bafda275e6ce0d0`
+- Frozen RTL commit: `3c7e84e392b345332d6acdd0ed899928dafb1058`
+- Canonical container: `ghcr.io/huyhuy-bit/rv32i-verify:1`
+- Open tools: Ubuntu 24.04; Verilator 5.048; RISC-V GCC 13.2.0-2024.04.12; RISC-V assembler 2.42; Python 3.12
+- Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-28
+- Reproduce verification: `make verify`
+- Reproduce benchmarks: `make bench` with the recorded headline configuration
+- Reproduce implementation: `make synth-matrix && make synth-summary`
 <!-- portfolio:provenance:end -->
 
 ## Historical material

@@ -1,0 +1,30 @@
+{
+  "expected": {
+    "architecture_lockstep": 38,
+    "architecture_tests": 38,
+    "benchmark_rows": 20,
+    "cover_points": 44,
+    "directed_programs": 25,
+    "memory_configurations": 6,
+    "predictor_configurations": 3,
+    "spike_random": 200,
+    "synthesis_rows": 4
+  },
+  "files": [
+    "verification.json",
+    "benchmarks.csv",
+    "synthesis.csv",
+    "tool_versions.json"
+  ],
+  "measured_at": "2026-08-28T13:46:38Z",
+  "rtl_commit": "3c7e84e392b345332d6acdd0ed899928dafb1058",
+  "schema": 1,
+  "sha256": {
+    "benchmarks.csv": "bd907f18449a52a988558d4dec84fc562f91a232d1f815d98f43d7ba3f2e75eb",
+    "synthesis.csv": "e6138059ac701921feebb543b39f72de2f37854fcc922ababf6c5a6fcbea3cc0",
+    "tool_versions.json": "5b5222154dba82781bcf637f2a6ef3d3d4e8b4d5ef9311d80b405d4541900641",
+    "verification.json": "94bfe7a0065b532501873f5b41b1eaac9b1d95f415e33f12545bbb53cda8f269"
+  },
+  "status": "complete",
+  "tooling_commit": "031fcd07c45b9fe59f6951fd0bafda275e6ce0d0"
+}

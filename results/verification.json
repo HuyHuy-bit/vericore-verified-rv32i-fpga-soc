@@ -1,0 +1,118 @@
+{
+  "architecture_lockstep": {
+    "discovered": 38,
+    "failed": 0,
+    "passed": 38
+  },
+  "architecture_tests": {
+    "discovered": 38,
+    "failed": 0,
+    "infrastructure": 0,
+    "missing": 0,
+    "passed": 38
+  },
+  "assertions": {
+    "concurrent": 25,
+    "immediate": 2
+  },
+  "commands": {
+    "architecture_lockstep": "make lockstep",
+    "architecture_tests": "make compliance",
+    "coverage": "make coverage",
+    "directed": "python3 tools/verification.py run --profile directed-memory",
+    "fast": "make check",
+    "predictor": "make predictor-test",
+    "python_random": "make soak SEEDS=1000",
+    "spike_random": "make soak-lockstep SEEDS=200"
+  },
+  "cover_points": {
+    "hit": 44,
+    "source": 44
+  },
+  "coverage": {
+    "branch": {
+      "hit": 186,
+      "total": 198
+    },
+    "expression": {
+      "hit": 202,
+      "total": 221
+    },
+    "line": {
+      "hit": 260,
+      "total": 278
+    },
+    "toggle": {
+      "hit": 8896,
+      "total": 17272
+    },
+    "user": {
+      "hit": 44,
+      "total": 44
+    }
+  },
+  "decoder_vectors": 2120,
+  "directed_programs": 25,
+  "harness_tests": 109,
+  "hazard_vectors": 262144,
+  "measured_at": "2026-08-28T03:34:50Z",
+  "memory_configurations": [
+    {
+      "name": "baseline",
+      "passed": 25
+    },
+    {
+      "name": "slow-mem",
+      "passed": 25
+    },
+    {
+      "name": "icache-only",
+      "passed": 25
+    },
+    {
+      "name": "wt",
+      "passed": 25
+    },
+    {
+      "name": "wb",
+      "passed": 25
+    },
+    {
+      "name": "assoc",
+      "passed": 25
+    }
+  ],
+  "predictor_configurations": [
+    {
+      "name": "gshare",
+      "passed": 25
+    },
+    {
+      "name": "no-ras",
+      "passed": 25
+    },
+    {
+      "name": "small-btb",
+      "passed": 25
+    }
+  ],
+  "python_random": {
+    "baseline": {
+      "passed": 1000,
+      "requested": 1000
+    },
+    "cached": {
+      "passed": 1000,
+      "requested": 1000
+    }
+  },
+  "rtl_commit": "3c7e84e392b345332d6acdd0ed899928dafb1058",
+  "schema": 1,
+  "spike_random": {
+    "instructions": 60,
+    "passed": 200,
+    "requested": 200
+  },
+  "status": "complete",
+  "tooling_commit": "031fcd07c45b9fe59f6951fd0bafda275e6ce0d0"
+}

@@ -1,0 +1,43 @@
+LIVE VERIFICATION
+$ python3 tools/verification.py run --profile fast
+fast correctness: PASS
+$ make --no-print-directory lockstep-sample
+Spike lockstep sample: PASS
+
+RV32I PIPELINE — VERIFIED PORTFOLIO SNAPSHOT
+
+tooling 031fcd07c45b | RTL 3c7e84e392b3
+Ubuntu 24.04 | Verilator 5.048 | RISC-V GCC 13.2.0-2024.04.12 | binutils 2.42 | Python 3.12
+
+CORRECTNESS
+decoder 2,120/2,120 | hazards 262,144/262,144 | harness 109/109
+directed 150/150 | predictors 75/75 | coverage 44/44
+
+REFERENCE FLOWS
+architecture signatures 38/38
+complete Spike traces 38/38
+random Spike programs 200/200
+
+BENCHMARKS — cycles / CPI
+| Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
+|---|---:|---:|---:|---:|
+| crc32 | 758,160 / 10.28041 | 170,189 / 2.30771 | 152,285 / 2.06494 | 75,816 / 1.02804 |
+| matmul | 3,504,148 / 11.37629 | 790,915 / 2.56772 | 712,507 / 2.31317 | 361,402 / 1.17330 |
+| sort | 2,521,060 / 12.48334 | 1,038,506 / 5.14229 | 504,874 / 2.49995 | 252,106 / 1.24833 |
+| llist | 932,270 / 10.00236 | 465,099 / 4.99006 | 188,643 / 2.02396 | 93,227 / 1.00024 |
+| interp | 14,652,250 / 11.69906 | 4,443,716 / 3.54808 | 2,933,372 / 2.34214 | 1,467,250 / 1.17152 |
+
+ROUTED ARTIX-7 RESULTS
+| Configuration | LUT | FF | BRAM tiles | WNS (ns) | Critical path (ns) | fmax (MHz) |
+|---|---:|---:|---:|---:|---:|---:|
+| Core | 4,031 | 5,220 | 0.5 | -11.111 | 13.111 | 76.272 |
+| +1KB 4-way I$ | 5,011 | 6,970 | 2.0 | -11.563 | 13.563 | 73.730 |
+| +4KB 4-way WT D$ | 8,800 | 13,527 | 4.0 | -12.172 | 14.172 | 70.562 |
+| +4KB 4-way WB D$ | 9,218 | 13,517 | 4.0 | -11.920 | 13.920 | 71.839 |
+
+REPRODUCE
+make verify
+make synth-matrix && make synth-summary
+make portfolio-gif
+
+All displayed values passed schema, provenance, population, arithmetic, and hash checks.

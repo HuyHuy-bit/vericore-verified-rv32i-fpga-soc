@@ -1,0 +1,26 @@
+{
+  "architecture_test_commit": "6f7f47bdc61c0c51c0cbf75789678a1235eeefc2",
+  "architecture_test_expected": 38,
+  "container": {
+    "base": "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
+    "digest": "sha256:c5e3ca79ff535e1399e2a57753d8103d789172531a58c8ff420b502697790e81",
+    "image": "ghcr.io/huyhuy-bit/rv32i-verify",
+    "revision": 1
+  },
+  "ffmpeg": "6.1.1",
+  "python": "3.12",
+  "riscv_as": "2.42",
+  "riscv_gcc": "13.2.0-2024.04.12",
+  "rtl_commit": "3c7e84e392b345332d6acdd0ed899928dafb1058",
+  "schema": 1,
+  "spike_commit": "55b4658dbf574ba0b714083ec436ce2cb5be1998",
+  "tooling_commit": "031fcd07c45b9fe59f6951fd0bafda275e6ce0d0",
+  "ubuntu": "24.04",
+  "verilator": "5.048",
+  "vhs": "0.11.0",
+  "vivado": {
+    "build": "6299465",
+    "platform": "wsl-windows",
+    "version": "2025.2"
+  }
+}

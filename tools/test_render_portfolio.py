@@ -31,7 +31,7 @@ class PortfolioRendererTest(unittest.TestCase):
     def write_documents(self) -> None:
         blocks = {
             "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-            "docs/EVIDENCE.md": ("facts", "verification", "benchmarks", "synthesis", "provenance"),
+            "docs/EVIDENCE.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
             "docs/MICROARCHITECTURE.md": ("facts", "benchmarks", "synthesis"),
             "docs/VERIFICATION_PLAN.md": ("facts", "summary"),
         }
@@ -98,6 +98,8 @@ class PortfolioRendererTest(unittest.TestCase):
                 "vivado_version": "2025.2",
                 "vivado_build": "1234567",
                 "part": "xc7a35ticsg324-1L",
+                "utilization_sha256": str(index) * 64,
+                "timing_sha256": str(index + 4) * 64,
             })
         return ResultSet(
             self.root / "results",
@@ -106,7 +108,12 @@ class PortfolioRendererTest(unittest.TestCase):
             tuple(benchmarks),
             tuple(synthesis),
             {
-                "container": {"image": "ghcr.io/example/verify", "revision": 1},
+                "container": {
+                    "image": "ghcr.io/example/verify",
+                    "revision": 1,
+                    "digest": "sha256:" + "e" * 64,
+                    "base": "ubuntu:24.04@sha256:" + "f" * 64,
+                },
                 "ubuntu": "24.04",
                 "verilator": "5.048",
                 "riscv_gcc": "13.2.0",
@@ -145,6 +152,9 @@ class PortfolioRendererTest(unittest.TestCase):
         self.assertIn("66.7–83.3 MHz routed Artix-7 implementations", rendered[self.root / "README.md"])
         self.assertIn("RISC-V assembler 2.42", rendered[self.root / "README.md"])
         self.assertIn("38/38", rendered[self.root / "docs/EVIDENCE.md"])
+        self.assertIn("`" + "a" * 40 + "`", rendered[self.root / "docs/EVIDENCE.md"])
+        self.assertIn("`" + "b" * 40 + "`", rendered[self.root / "docs/EVIDENCE.md"])
+        self.assertIn("`" + "0" * 64 + "` / `" + "4" * 64 + "`", rendered[self.root / "docs/EVIDENCE.md"])
         for value in rendered.values():
             self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
             self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
