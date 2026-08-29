@@ -55,7 +55,7 @@
   "directed_programs": 25,
   "harness_tests": 109,
   "hazard_vectors": 262144,
-  "measured_at": "2026-08-28T03:34:50Z",
+  "measured_at": "2026-08-29T05:23:30Z",
   "memory_configurations": [
     {
       "name": "baseline",
@@ -106,7 +106,7 @@
       "requested": 1000
     }
   },
-  "rtl_commit": "3c7e84e392b345332d6acdd0ed899928dafb1058",
+  "rtl_commit": "e55cf402670481413c910c2f2a51617ed53342a5",
   "schema": 1,
   "spike_random": {
     "instructions": 60,
@@ -114,5 +114,5 @@
     "requested": 200
   },
   "status": "complete",
-  "tooling_commit": "031fcd07c45b9fe59f6951fd0bafda275e6ce0d0"
+  "tooling_commit": "b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359"
 }

@@ -1,9 +1,9 @@
 # Evidence ledger
 
 <!-- portfolio:overview:start -->
-This ledger separates source-derived facts, pinned external inputs, current measurements, and historical design studies. Open-source gates were measured at `2026-08-28T03:34:50Z`; the compact result set was published at `2026-08-28T13:46:38Z`; Vivado manifests record `2026-08-28`. The tooling commit is `031fcd07c45b9fe59f6951fd0bafda275e6ce0d0`, and the frozen RTL baseline is `3c7e84e392b345332d6acdd0ed899928dafb1058`.
+This ledger separates source-derived facts, pinned external inputs, current measurements, and historical design studies. Open-source gates were measured at `2026-08-29T05:23:30Z`; the compact result set was published at `2026-08-29T05:56:10Z`; Vivado manifests record `2026-08-29`. The tooling commit is `b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359`, and the frozen RTL baseline is `e55cf402670481413c910c2f2a51617ed53342a5`.
 
-The pinned environment is Ubuntu 24.04 in `ghcr.io/huyhuy-bit/rv32i-verify:1` (`sha256:c5e3ca79ff535e1399e2a57753d8103d789172531a58c8ff420b502697790e81`), Verilator 5.048, Python 3.12, RISC-V GCC 13.2.0-2024.04.12 with assembler 2.42, Spike `55b4658dbf574ba0b714083ec436ce2cb5be1998`, architecture tests `6f7f47bdc61c0c51c0cbf75789678a1235eeefc2`, and Vivado 2025.2 build 6299465.
+The pinned environment is Ubuntu 24.04 in `ghcr.io/huyhuy-bit/rv32i-verify:1` (`sha256:45fa6be40bdfce85a4aa8dfde1b67f3c9433e42b2fd0e759ae57f3c4ffcb1df8`), Verilator 5.048, Python 3.12, RISC-V GCC 13.2.0-2024.04.12 with assembler 2.42, Spike `55b4658dbf574ba0b714083ec436ce2cb5be1998`, architecture tests `6f7f47bdc61c0c51c0cbf75789678a1235eeefc2`, and Vivado 2025.2 build 6299465.
 <!-- portfolio:overview:end -->
 
 ## Machine-checked facts
@@ -94,19 +94,19 @@ The SHA-256 pairs below are `utilization.rpt` / `timing_summary.rpt`:
 
 | Configuration | Report hashes |
 |---|---|
-| core | `4c83d1366b6706a20d9a2cc8276c0ad96ccd55f1a3e8a40d915026ad3fb4a419` / `4da3b45e91d44fbcf1a12d12737e61bf4512b6a6a2c6f88cdf098bb910a5c278` |
-| I$ | `2ec3f5376634a8321ef2de183a8b5ca86ad8a3483fc4ed88f50cf3d943cc72b7` / `a1da34c85b579621966b1e89dd60248a8c63f080734aa53ad26d2e6cf5138acf` |
-| D$ write-through | `4544fbf9ccad5ca1f62d9cd216abebe063afc0ffe68b6e0df8c2795ae2a359e2` / `942c1dda0a2ce3f0c76a909b70f30941b9e4f83519e75ec06b5483d363f6c5ba` |
-| D$ write-back | `e8994c085b2b91f16df7b92be791a9bc50468264387c8d389f5f84d55c42d9a6` / `3834c564c2dcf047d40a5bd4678bf089e2d235044f54d6d1100f6010a6f5d9bb` |
+| core | `96925f405a08f2e168b9ce69ebf323d43cc72c66b92be3437b8bb61dbe33b21c` / `3df0869006aa498b30d56b35299263decb9213dec567640380bf05f0ac32baa3` |
+| I$ | `8059baf0a2d593be8a56974974ace0928a06a00ea57e21427f729e7ac207145e` / `0415ed47e5133ab7ec6fc0de2e88c5c62cceefcd38c9ef285a9296a90681b11f` |
+| D$ write-through | `2a98b8d37f67e9d393b1c4072e484a6a5c696ce772984a6710e2549ca35c82ca` / `6af38f4ea2a279b49c75013858cdfb3205c3697dfeb4d27ee640c2834b8c1251` |
+| D$ write-back | `3e088416f98d84ef9ddb8d4784ddde2e6f7a80472d322b56752b192f2eda4ba3` / `a12a3e63c32789d561ad0658b8c0954b6313e8a34dec7d8365523de90b2cfec7` |
 <!-- portfolio:synthesis-hashes:end -->
 
 <!-- portfolio:provenance:start -->
-- Measurement timestamp: `2026-08-28T13:46:38Z`
-- Tooling commit: `031fcd07c45b9fe59f6951fd0bafda275e6ce0d0`
-- Frozen RTL commit: `3c7e84e392b345332d6acdd0ed899928dafb1058`
+- Measurement timestamp: `2026-08-29T05:56:10Z`
+- Tooling commit: `b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359`
+- Frozen RTL commit: `e55cf402670481413c910c2f2a51617ed53342a5`
 - Canonical container: `ghcr.io/huyhuy-bit/rv32i-verify:1`
 - Open tools: Ubuntu 24.04; Verilator 5.048; RISC-V GCC 13.2.0-2024.04.12; RISC-V assembler 2.42; Python 3.12
-- Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-28
+- Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-29
 - Reproduce verification: `make verify`
 - Reproduce benchmarks: `make bench` with the recorded headline configuration
 - Reproduce implementation: `make synth-matrix && make synth-summary`

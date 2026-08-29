@@ -167,12 +167,12 @@ The deeper rationale—including cache inference experiments, exception ordering
 <summary>Measurement provenance</summary>
 
 <!-- portfolio:provenance:start -->
-- Measurement timestamp: `2026-08-28T13:46:38Z`
-- Tooling commit: `031fcd07c45b9fe59f6951fd0bafda275e6ce0d0`
-- Frozen RTL commit: `3c7e84e392b345332d6acdd0ed899928dafb1058`
+- Measurement timestamp: `2026-08-29T05:56:10Z`
+- Tooling commit: `b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359`
+- Frozen RTL commit: `e55cf402670481413c910c2f2a51617ed53342a5`
 - Canonical container: `ghcr.io/huyhuy-bit/rv32i-verify:1`
 - Open tools: Ubuntu 24.04; Verilator 5.048; RISC-V GCC 13.2.0-2024.04.12; RISC-V assembler 2.42; Python 3.12
-- Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-28
+- Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-29
 - Reproduce verification: `make verify`
 - Reproduce benchmarks: `make bench` with the recorded headline configuration
 - Reproduce implementation: `make synth-matrix && make synth-summary`

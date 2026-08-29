@@ -6,7 +6,7 @@ Spike lockstep sample: PASS
 
 RV32I PIPELINE — VERIFIED PORTFOLIO SNAPSHOT
 
-tooling 031fcd07c45b | RTL 3c7e84e392b3
+tooling b8217e0294c2 | RTL e55cf4026704
 Ubuntu 24.04 | Verilator 5.048 | RISC-V GCC 13.2.0-2024.04.12 | binutils 2.42 | Python 3.12
 
 CORRECTNESS
