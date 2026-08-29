@@ -19,6 +19,7 @@ EVIDENCE_FACT SOURCE_COVER_POINTS=44
 EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
 EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
 EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
+EVIDENCE_FACT EVIDENCE_STATUS=current
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
 EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
@@ -31,6 +32,10 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 These values are checked against the Make test list and on-disk pairs, RTL
 assertions and covers, workflow matrix and seed command, coverage report, and
 central reference metadata by `make evidence-check`.
+
+<!-- portfolio:status:start -->
+Current measurements — validated for the checked-out RTL.
+<!-- portfolio:status:end -->
 
 ## Current verification measurements
 

@@ -9,6 +9,6 @@ Set Padding 16
 Set Framerate 30
 Set TypingSpeed 25ms
 
-Type "python3 tools/portfolio_demo.py --live"
+Type "python3 tools/portfolio_demo.py --replay"
 Enter
-Sleep 30s
+Sleep 32s

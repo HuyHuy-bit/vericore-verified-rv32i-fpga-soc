@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from tools import results as results_module
 from tools.results import (
     BENCHMARK_FIELDS,
     SYNTHESIS_FIELDS,
@@ -34,6 +35,7 @@ class ResultSetTest(unittest.TestCase):
         self.checkout = Path(self.tmp.name) / "repo"
         self.results = self.checkout / "results"
         (self.checkout / "tools").mkdir(parents=True)
+        (self.checkout / "rtl").mkdir()
         self.results.mkdir()
         (self.results / "FORMAT.md").write_text("fixture results\n", encoding="utf-8")
         (self.checkout / "tools/reference_versions.env").write_text(
@@ -60,6 +62,16 @@ class ResultSetTest(unittest.TestCase):
             "class HarnessTests:\n"
             "    def test_first(self): pass\n"
             "    def test_second(self): pass\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "rtl/core.sv").write_text(
+            "module core;\n"
+            + "\n".join(f"a{i}: assert property (1);" for i in range(25))
+            + "\n"
+            + "\n".join(f"i{i}: assert (1);" for i in range(2))
+            + "\n"
+            + "\n".join(f"c{i}: cover property (1);" for i in range(44))
+            + "\nendmodule\n",
             encoding="utf-8",
         )
         self.write_fixture()
@@ -284,6 +296,62 @@ class ResultSetTest(unittest.TestCase):
         loaded = load_result_set(self.results)
         self.assertEqual(len(loaded.benchmarks), 20)
         self.assertEqual(len(loaded.synthesis), 4)
+        self.assertEqual(validate_result_set(self.results, self.checkout), [])
+
+    def test_historical_rtl_uses_recorded_source_counts(self) -> None:
+        rtl = self.checkout / "rtl/core.sv"
+        rtl.write_text(
+            "module core;\n"
+            + "\n".join(f"a{i}: assert property (1);" for i in range(25))
+            + "\n"
+            + "\n".join(f"i{i}: assert (1);" for i in range(2))
+            + "\n"
+            + "\n".join(f"c{i}: cover property (1);" for i in range(44))
+            + "\nendmodule\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "sim").mkdir()
+        (self.checkout / "sim/cpu_tb.cpp").write_text("int main() {}\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.checkout, check=True)
+        subprocess.run(["git", "config", "user.name", "Fixture"], cwd=self.checkout, check=True)
+        subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=self.checkout, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.checkout, check=True)
+        subprocess.run(["git", "commit", "-qm", "measured source"], cwd=self.checkout, check=True)
+        measured = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True
+        ).strip()
+
+        verification = self.verification()
+        verification["tooling_commit"] = measured
+        verification["rtl_commit"] = measured
+        self.write_json("verification.json", verification)
+        benchmarks = self.benchmark_rows()
+        synthesis = self.synthesis_rows()
+        for row in (*benchmarks, *synthesis):
+            row["tooling_commit"] = measured
+            row["rtl_commit"] = measured
+        self.write_csv("benchmarks.csv", BENCHMARK_FIELDS, benchmarks)
+        self.write_csv("synthesis.csv", SYNTHESIS_FIELDS, synthesis)
+        versions = self.tool_versions()
+        versions["tooling_commit"] = measured
+        versions["rtl_commit"] = measured
+        self.write_json("tool_versions.json", versions)
+        manifest = json.loads((self.results / "manifest.json").read_text(encoding="utf-8"))
+        manifest["tooling_commit"] = measured
+        manifest["rtl_commit"] = measured
+        self.write_json("manifest.json", manifest)
+        self.refresh_manifest()
+        subprocess.run(["git", "add", "results"], cwd=self.checkout, check=True)
+        subprocess.run(["git", "commit", "-qm", "publish results"], cwd=self.checkout, check=True)
+
+        self.assertTrue(hasattr(results_module, "evidence_state"), "evidence state is missing")
+        self.assertEqual(results_module.evidence_state(self.checkout, measured), "current")
+        self.assertEqual(validate_result_set(self.results, self.checkout), [])
+
+        rtl.write_text(rtl.read_text(encoding="utf-8") + "// later RTL change\n", encoding="utf-8")
+        subprocess.run(["git", "add", "rtl/core.sv"], cwd=self.checkout, check=True)
+        subprocess.run(["git", "commit", "-qm", "change rtl"], cwd=self.checkout, check=True)
+        self.assertEqual(results_module.evidence_state(self.checkout, measured), "historical")
         self.assertEqual(validate_result_set(self.results, self.checkout), [])
 
     def test_duplicate_json_key_is_rejected(self) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -30,16 +31,20 @@ class PortfolioRendererTest(unittest.TestCase):
 
     def write_documents(self) -> None:
         blocks = {
-            "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-            "docs/evidence.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
-            "docs/architecture.md": ("facts", "benchmarks", "synthesis"),
-            "docs/verification.md": ("facts", "summary"),
+            "README.md": ("facts", "status", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
+            "docs/evidence.md": ("overview", "facts", "status", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+            "docs/architecture.md": ("facts", "status", "benchmarks", "synthesis"),
+            "docs/verification.md": ("facts", "status", "summary"),
         }
         for relative, names in blocks.items():
             body = [f"# {relative}", ""]
             for name in names:
                 body.extend((f"<!-- portfolio:{name}:start -->", "stale", f"<!-- portfolio:{name}:end -->", ""))
             (self.root / relative).write_text("\n".join(body), encoding="utf-8")
+        (self.root / "docs/coverage.md").write_text(
+            "# Coverage\n\n**Evidence status: current.**\n\n**44/44 cover points hit (100.0%)**\n",
+            encoding="utf-8",
+        )
 
     def result_set(self) -> ResultSet:
         verification = {
@@ -147,6 +152,7 @@ class PortfolioRendererTest(unittest.TestCase):
             self.root / "docs/evidence.md",
             self.root / "docs/architecture.md",
             self.root / "docs/verification.md",
+            self.root / "docs/coverage.md",
         })
         self.assertIn("25 directed tests × 6 memory configurations", rendered[self.root / "README.md"])
         self.assertIn("66.7–83.3 MHz routed Artix-7 implementations", rendered[self.root / "README.md"])
@@ -155,11 +161,50 @@ class PortfolioRendererTest(unittest.TestCase):
         self.assertIn("`" + "a" * 40 + "`", rendered[self.root / "docs/evidence.md"])
         self.assertIn("`" + "b" * 40 + "`", rendered[self.root / "docs/evidence.md"])
         self.assertIn("`" + "0" * 64 + "` / `" + "4" * 64 + "`", rendered[self.root / "docs/evidence.md"])
-        for value in rendered.values():
-            self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
-            self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
+        for path, value in rendered.items():
+            if path.name != "coverage.md":
+                self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
+                self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
             self.assertFalse(any(line != line.rstrip() for line in value.splitlines()))
         self.assertNotIn("\nstale\n", "".join(rendered.values()))
+
+    def test_historical_results_are_labeled_in_every_document(self) -> None:
+        (self.root / "rtl").mkdir()
+        (self.root / "rtl/core.sv").write_text("module core; endmodule\n", encoding="utf-8")
+        (self.root / "sim").mkdir()
+        (self.root / "sim/cpu_tb.cpp").write_text("int main() {}\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "Fixture"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "fixture@example.com"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "measured source"], cwd=self.root, check=True)
+        measured = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+        ).strip()
+        self.result.manifest["rtl_commit"] = measured
+        (self.root / "rtl/core.sv").write_text(
+            "module core; logic later; endmodule\n", encoding="utf-8"
+        )
+        notice = (
+            "Historical measurements — validated for RTL "
+            + measured
+            + "; current RTL changes are not yet remeasured."
+        )
+        rendered = render_documents(self.root, self.result)
+        for relative in (
+            "README.md",
+            "docs/evidence.md",
+            "docs/architecture.md",
+            "docs/verification.md",
+        ):
+            self.assertIn(notice, rendered[self.root / relative])
+            self.assertIn("EVIDENCE_FACT EVIDENCE_STATUS=historical", rendered[self.root / relative])
+        self.assertIn(
+            "**Evidence status: historical.**",
+            rendered[self.root / "docs/coverage.md"],
+        )
 
     def test_check_detects_stale_content_and_write_is_idempotent(self) -> None:
         with mock.patch("tools.render_portfolio.load_validated", return_value=self.result):

@@ -309,6 +309,8 @@ portfolio-demo:
 
 portfolio-demo-record:
 	python3 tools/prepare_references.py
+	python3 tools/verification.py run --profile fast
+	$(MAKE) --no-print-directory lockstep-sample
 	python3 tools/portfolio_demo.py --write-transcript
 	vhs docs/media/portfolio-demo.tape
 	python3 tools/portfolio_demo.py --write-media-manifest

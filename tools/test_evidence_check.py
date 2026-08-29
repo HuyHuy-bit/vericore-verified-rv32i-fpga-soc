@@ -321,7 +321,8 @@ class EvidenceContractTest(unittest.TestCase):
             "SOURCE_COVER_POINTS": "2",
             "TRACKED_COVERAGE_HIT": "1",
             "TRACKED_COVERAGE_TOTAL": "2",
-            "TRACKED_COVERAGE_STATUS": "historical",
+            "TRACKED_COVERAGE_STATUS": "current",
+            "EVIDENCE_STATUS": "current",
             "CI_CONFIGS": "6",
             "CI_MATRIX": ",".join(name for name, _ in self.MATRIX),
             "ARCH_TEST_SHA": self.ARCH_SHA,
@@ -364,7 +365,7 @@ class EvidenceContractTest(unittest.TestCase):
         self.write(
             "docs/coverage.md",
             "# Functional coverage report\n\n"
-            "**Evidence status: historical.**\n\n"
+            "**Evidence status: current.**\n\n"
             "**1/2 cover points hit (50.0%)**, from a recorded run.\n",
         )
         block = self.fact_block()
@@ -1073,7 +1074,7 @@ class EvidenceContractTest(unittest.TestCase):
         self.replace_all_fact_values("SOURCE_COVER_POINTS=2", "SOURCE_COVER_POINTS=3")
         self.assert_evidence_failure("SOURCE_COVER_POINTS")
 
-    def test_historical_coverage_fact_must_match_report(self) -> None:
+    def test_tracked_coverage_fact_must_match_report(self) -> None:
         self.write_evidence_tree()
         path = self.repo / "docs/coverage.md"
         path.write_text(
@@ -1084,17 +1085,6 @@ class EvidenceContractTest(unittest.TestCase):
 
     def test_current_coverage_total_must_match_source(self) -> None:
         self.write_evidence_tree()
-        self.replace_all_fact_values(
-            "TRACKED_COVERAGE_STATUS=historical",
-            "TRACKED_COVERAGE_STATUS=current",
-        )
-        path = self.repo / "docs/coverage.md"
-        path.write_text(
-            path.read_text(encoding="utf-8").replace(
-                "Evidence status: historical", "Evidence status: current"
-            ),
-            encoding="utf-8",
-        )
         self.write(
             "rtl/core.sv",
             (self.repo / "rtl/core.sv").read_text(encoding="utf-8").replace(
@@ -1103,6 +1093,11 @@ class EvidenceContractTest(unittest.TestCase):
             ),
         )
         self.assert_evidence_failure("current coverage total")
+
+    def test_evidence_status_fact_must_match_checkout_state(self) -> None:
+        self.write_evidence_tree()
+        self.replace_all_fact_values("EVIDENCE_STATUS=current", "EVIDENCE_STATUS=historical")
+        self.assert_evidence_failure("EVIDENCE_STATUS")
 
     def test_ci_configuration_fact_must_match_workflow(self) -> None:
         self.write_evidence_tree()

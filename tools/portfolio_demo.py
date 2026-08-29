@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Callable, TextIO
 
 if __package__:
@@ -84,8 +85,8 @@ def sections(result: ResultSet) -> tuple[str, ...]:
     )
 
 
-def gate_text(root: Path) -> str:
-    lines = ["LIVE VERIFICATION"]
+def gate_text(root: Path, heading: str = "LIVE VERIFICATION") -> str:
+    lines = [heading]
     for step in demo_steps(root):
         lines.extend(("$ " + " ".join(step.command), f"{step.name}: PASS"))
     return "\n".join(lines)
@@ -142,6 +143,25 @@ def run_demo(
         transcript.write(f"{step.name}: PASS\n")
         transcript.flush()
     transcript.write("\n" + "\n\n".join(sections(result)) + "\n")
+    return 0
+
+
+def replay_demo(
+    root: Path,
+    transcript: TextIO,
+    delay: float = 3.0,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> int:
+    result = load_result(root.resolve())
+    slides = (
+        gate_text(root, "VERIFICATION GATES PASSED"),
+        *sections(result),
+        "DEMO COMPLETE",
+    )
+    for slide in slides:
+        transcript.write("\033[2J\033[H" + slide + "\n")
+        transcript.flush()
+        sleeper(delay)
     return 0
 
 
@@ -260,11 +280,13 @@ def validate_media(root: Path) -> list[str]:
             "Output docs/media/portfolio-demo.gif",
             "Set Width 1280",
             "Set Height 720",
-            'Type "python3 tools/portfolio_demo.py --live"',
+            'Type "python3 tools/portfolio_demo.py --replay"',
         )
         for token in tokens:
             if tape_source.count(token) != 1:
                 errors.append(f"portfolio demo tape must contain {token}")
+        if "--live" in tape_source:
+            errors.append("portfolio demo tape may not run live verification")
     except FileNotFoundError:
         errors.append("portfolio demo tape is missing")
     try:
@@ -312,6 +334,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--summary", action="store_true")
     group.add_argument("--live", action="store_true")
+    group.add_argument("--replay", action="store_true")
     group.add_argument("--write-transcript", action="store_true")
     group.add_argument("--write-media-manifest", action="store_true")
     group.add_argument("--check", action="store_true")
@@ -343,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.live:
             return run_demo(root, sys.stdout, live=True)
+        if args.replay:
+            return replay_demo(root, sys.stdout)
         result = load_result(root)
         print(summary_text(result), end="")
         return 0

@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "sha256": {
-    "portfolio-demo.gif": "334c710d397ff91a15e4f363bc198e42c79dcbcbbac1b80a6f17ac74ecb67375",
-    "portfolio-demo.tape": "56b11379a24133620cb95b2969f2cd5f38c2d6e2e7f98fc0af135a5e76a8d23a",
+    "portfolio-demo.gif": "b8f4d3517373748bcf52de8d24cf9d8790134dd81d94d38904778e44f854d418",
+    "portfolio-demo.tape": "171fa9597359a82b188d192d031a5e4dc51b8933ec1fb79a29f55aacbde48b68",
     "portfolio-demo.txt": "9ad2438194a735d5696541a4525bdd60deef3572b66519192d2a230676e63796"
   }
 }

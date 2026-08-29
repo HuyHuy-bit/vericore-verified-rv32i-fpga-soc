@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Literal
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
@@ -329,7 +329,12 @@ def load_env(path: Path, errors: list[str]) -> dict[str, str]:
     return values
 
 
-def validate_manifest(result: ResultSet, errors: list[str], architecture_expected: int) -> None:
+def validate_manifest(
+    result: ResultSet,
+    errors: list[str],
+    architecture_expected: int,
+    cover_expected: int,
+) -> None:
     value = result.manifest
     if not exact_fields(value, MANIFEST_FIELDS, "manifest", errors):
         return
@@ -373,7 +378,7 @@ def validate_manifest(result: ResultSet, errors: list[str], architecture_expecte
             "architecture_tests": architecture_expected,
             "architecture_lockstep": architecture_expected,
             "spike_random": 200,
-            "cover_points": 44,
+            "cover_points": cover_expected,
         }
         for key, expected_value in wanted.items():
             if value["expected"][key] != expected_value:
@@ -385,6 +390,9 @@ def validate_verification(
     errors: list[str],
     architecture_expected: int,
     harness_expected: int,
+    concurrent_expected: int,
+    immediate_expected: int,
+    cover_expected: int,
 ) -> None:
     value = result.verification
     if not exact_fields(value, VERIFICATION_FIELDS, "verification", errors):
@@ -404,14 +412,18 @@ def validate_verification(
             errors.append(f"verification {key} must be {expected}")
     if value["harness_tests"] != harness_expected:
         errors.append(
-            f"verification harness test count must match current source ({harness_expected})"
+            f"verification harness test count must match recorded source ({harness_expected})"
         )
     if exact_fields(value["assertions"], {"concurrent", "immediate"}, "assertions", errors):
-        if value["assertions"] != {"concurrent": 25, "immediate": 2}:
-            errors.append("assertion counts must be 25 concurrent and 2 immediate")
+        expected = {
+            "concurrent": concurrent_expected,
+            "immediate": immediate_expected,
+        }
+        if value["assertions"] != expected:
+            errors.append("assertion counts must match recorded RTL source")
     if exact_fields(value["cover_points"], {"source", "hit"}, "cover_points", errors):
-        if value["cover_points"] != {"source": 44, "hit": 44}:
-            errors.append("cover-point counts must be 44/44")
+        if value["cover_points"] != {"source": cover_expected, "hit": cover_expected}:
+            errors.append("cover-point counts must match recorded RTL source")
     validate_configurations(
         value["memory_configurations"], MEMORY_CONFIGURATIONS, "memory", errors
     )
@@ -441,8 +453,8 @@ def validate_verification(
                 total = require_uint(group["total"], f"coverage {name} total", errors)
                 if hit is not None and total is not None and hit > total:
                     errors.append(f"coverage {name} hit exceeds total")
-        if value["coverage"]["user"] != {"hit": 44, "total": 44}:
-            errors.append("user coverage must be 44/44")
+        if value["coverage"]["user"] != {"hit": cover_expected, "total": cover_expected}:
+            errors.append("user coverage must match recorded RTL source")
     command_names = {
         "fast", "directed", "predictor", "python_random", "architecture_tests",
         "architecture_lockstep", "spike_random", "coverage",
@@ -650,14 +662,35 @@ def validate_provenance(result: ResultSet, checkout: Path, errors: list[str]) ->
             )
             if probe.returncode != 0:
                 errors.append(f"{label} commit does not exist in this checkout")
-        if isinstance(rtl, str) and SHA_RE.fullmatch(rtl):
-            paths = [path for path in ("rtl", "sim/cpu_tb.cpp") if (checkout / path).exists()]
-            if paths:
-                diff = subprocess.run(
-                    ["git", "-C", str(checkout), "diff", "--quiet", rtl, "--", *paths]
-                )
-                if diff.returncode != 0:
-                    errors.append("tracked RTL differs from the frozen RTL commit")
+
+
+def result_source_counts(
+    result: ResultSet,
+    checkout: Path,
+) -> tuple[int, int, int, int]:
+    rtl_commit = result.manifest.get("rtl_commit")
+    tooling_commit = result.manifest.get("tooling_commit")
+    if not isinstance(rtl_commit, str) or SHA_RE.fullmatch(rtl_commit) is None:
+        raise ResultError("manifest RTL commit is invalid")
+    if not isinstance(tooling_commit, str) or SHA_RE.fullmatch(tooling_commit) is None:
+        raise ResultError("manifest tooling commit is invalid")
+    if evidence_state(checkout, rtl_commit) == "historical":
+        harness = harness_test_count_text(
+            git_blob(checkout, tooling_commit, "tools/test_harness.py"),
+            f"{tooling_commit}:tools/test_harness.py",
+        )
+        paths = tuple(
+            path for path in git_paths(checkout, rtl_commit, "rtl")
+            if path.endswith(".sv")
+        )
+        if not paths:
+            raise ResultError("recorded RTL commit contains no SystemVerilog sources")
+        source = "\n".join(git_blob(checkout, rtl_commit, path) for path in paths)
+        concurrent, immediate, covers = sv_property_counts(source)
+        return harness, concurrent, immediate, covers
+    harness = harness_test_count(checkout / "tools/test_harness.py")
+    concurrent, immediate, covers = checkout_property_counts(checkout)
+    return harness, concurrent, immediate, covers
 
 
 def validate_result_set(root: Path, checkout: Path) -> list[str]:
@@ -672,14 +705,21 @@ def validate_result_set(root: Path, checkout: Path) -> list[str]:
     if architecture_expected <= 0:
         errors.append("ARCH_TEST_EXPECTED must be a positive canonical integer")
     try:
-        harness_expected = harness_test_count(
-            checkout.resolve() / "tools" / "test_harness.py"
-        )
-    except (OSError, SyntaxError) as exc:
-        errors.append(f"cannot derive harness test count: {exc}")
-        harness_expected = -1
-    validate_manifest(result, errors, architecture_expected)
-    validate_verification(result, errors, architecture_expected, harness_expected)
+        source_counts = result_source_counts(result, checkout.resolve())
+    except (OSError, ResultError, SyntaxError) as exc:
+        errors.append(f"cannot derive recorded source counts: {exc}")
+        source_counts = (-1, -1, -1, -1)
+    harness_expected, concurrent_expected, immediate_expected, cover_expected = source_counts
+    validate_manifest(result, errors, architecture_expected, cover_expected)
+    validate_verification(
+        result,
+        errors,
+        architecture_expected,
+        harness_expected,
+        concurrent_expected,
+        immediate_expected,
+        cover_expected,
+    )
     validate_benchmarks(result, errors)
     validate_synthesis(result, errors)
     validate_tools(result, checkout.resolve(), errors)
@@ -697,6 +737,61 @@ def git_text(root: Path, *arguments: str) -> str:
     if result.returncode != 0:
         raise ResultError(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def git_blob(checkout: Path, commit: str, relative: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(checkout), "show", f"{commit}:{relative}"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise ResultError(f"cannot read recorded source {commit}:{relative}")
+    return result.stdout
+
+
+def git_paths(checkout: Path, commit: str, prefix: str) -> tuple[str, ...]:
+    prefix = prefix.strip("/")
+    if not prefix or prefix == "." or ".." in Path(prefix).parts:
+        raise ResultError("recorded source prefix is invalid")
+    output = git_text(
+        checkout, "ls-tree", "-r", "--name-only", commit, "--", prefix
+    )
+    paths = tuple(output.splitlines()) if output else ()
+    if any(path != prefix and not path.startswith(prefix + "/") for path in paths):
+        raise ResultError("recorded source path escaped its prefix")
+    return paths
+
+
+def evidence_state(
+    checkout: Path,
+    rtl_commit: str,
+) -> Literal["current", "historical"]:
+    checkout = checkout.resolve()
+    if not (checkout / ".git").exists():
+        return "current"
+    paths = ("rtl", "sim/cpu_tb.cpp")
+    diff = subprocess.run(
+        ["git", "-C", str(checkout), "diff", "--quiet", rtl_commit, "--", *paths],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if diff.returncode not in (0, 1):
+        raise ResultError(f"cannot compare RTL with recorded commit: {diff.stderr.strip()}")
+    status = subprocess.run(
+        [
+            "git", "-C", str(checkout), "status", "--porcelain",
+            "--untracked-files=all", "--", *paths,
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if status.returncode != 0:
+        raise ResultError(f"cannot inspect RTL checkout state: {status.stderr.strip()}")
+    return "current" if diff.returncode == 0 and not status.stdout.strip() else "historical"
 
 
 def require_clean_checkout(checkout: Path, source_commit: str) -> None:
@@ -906,8 +1001,8 @@ def source_vector_count(path: Path, label: str, expected: int) -> int:
     return expected
 
 
-def harness_test_count(path: Path) -> int:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def harness_test_count_text(source: str, filename: str) -> int:
+    tree = ast.parse(source, filename=filename)
     return sum(
         1
         for node in tree.body
@@ -918,12 +1013,33 @@ def harness_test_count(path: Path) -> int:
     )
 
 
-def rtl_property_counts(checkout: Path) -> tuple[int, int]:
+def harness_test_count(path: Path) -> int:
+    return harness_test_count_text(path.read_text(encoding="utf-8"), str(path))
+
+
+def strip_sv_comments(source: str) -> str:
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//.*", "", source)
+
+
+def sv_property_counts(source: str) -> tuple[int, int, int]:
+    source = strip_sv_comments(source)
+    return (
+        len(re.findall(r"\bassert\s+property\s*\(", source)),
+        len(re.findall(r"\bassert\s*\(", source)),
+        len(re.findall(r"\bcover\s+property\s*\(", source)),
+    )
+
+
+def checkout_property_counts(checkout: Path) -> tuple[int, int, int]:
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted((checkout / "rtl").rglob("*.sv"))
     )
-    concurrent = len(re.findall(r"\bassert\s+property\s*\(", source))
-    immediate = len(re.findall(r"\bassert\s*\(", source))
+    return sv_property_counts(source)
+
+
+def rtl_property_counts(checkout: Path) -> tuple[int, int]:
+    concurrent, immediate, _ = checkout_property_counts(checkout)
     return concurrent, immediate
 
 

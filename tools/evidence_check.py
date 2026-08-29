@@ -27,6 +27,7 @@ FACT_KEYS = (
     "TRACKED_COVERAGE_HIT",
     "TRACKED_COVERAGE_TOTAL",
     "TRACKED_COVERAGE_STATUS",
+    "EVIDENCE_STATUS",
     "CI_CONFIGS",
     "CI_MATRIX",
     "ARCH_TEST_SHA",
@@ -1274,15 +1275,51 @@ def check_published_portfolio(
             raise ContractError(errors[0])
 
 
+def published_evidence(
+    root: Path,
+    current_counts: tuple[int, int, int],
+) -> tuple[str, tuple[int, int, int], str | None]:
+    result_root = root / "results"
+    present = {name for name in RESULT_RECORDS if (result_root / name).is_file()}
+    if present != set(RESULT_RECORDS):
+        return "current", current_counts, None
+    try:
+        if __package__:
+            from .results import (
+                evidence_state,
+                load_result_set,
+                result_source_counts,
+            )
+        else:
+            from results import evidence_state, load_result_set, result_source_counts
+        result = load_result_set(result_root)
+        commit = result.manifest["rtl_commit"]
+        state = evidence_state(root, commit)
+        if state == "historical":
+            _, concurrent, immediate, covers = result_source_counts(result, root)
+            return state, (concurrent, immediate, covers), commit
+        return state, current_counts, commit
+    except (KeyError, OSError, ValueError) as exc:
+        raise ContractError(f"cannot derive published evidence state: {exc}") from exc
+
+
 def check_repository_evidence(root: Path) -> None:
     versions = parse_reference_versions(root)
     check_build_surface(root)
     tests = check_directed_inventory(root)
     concurrent, immediate, covers = rtl_property_counts(root)
+    evidence_status, source_counts, measured_rtl = published_evidence(
+        root, (concurrent, immediate, covers)
+    )
+    concurrent, immediate, covers = source_counts
     hit, coverage_total, coverage_status = coverage_facts(root)
-    if coverage_status == "current" and coverage_total != covers:
+    if coverage_status != evidence_status:
         raise ContractError(
-            f"current coverage total {coverage_total} does not match source cover count {covers}"
+            f"coverage status {coverage_status} does not match evidence state {evidence_status}"
+        )
+    if coverage_total != covers:
+        raise ContractError(
+            f"{evidence_status} coverage total {coverage_total} does not match source cover count {covers}"
         )
 
     rtl_path = root / ".github/workflows/rtl-tests.yml"
@@ -1301,6 +1338,7 @@ def check_repository_evidence(root: Path) -> None:
         "TRACKED_COVERAGE_HIT": str(hit),
         "TRACKED_COVERAGE_TOTAL": str(coverage_total),
         "TRACKED_COVERAGE_STATUS": coverage_status,
+        "EVIDENCE_STATUS": evidence_status,
         "CI_CONFIGS": str(len(matrix)),
         "CI_MATRIX": ",".join(name for name, _ in matrix),
         "ARCH_TEST_SHA": versions["ARCH_TEST_SHA"],
@@ -1309,6 +1347,14 @@ def check_repository_evidence(root: Path) -> None:
         "SPIKE_RANDOM_SEEDS": str(workflow_seed(root)),
     }
     documents = {relative: document_facts(root, relative) for relative in FACT_DOCUMENTS}
+    if evidence_status == "historical":
+        notice = (
+            "Historical measurements — validated for RTL "
+            f"{measured_rtl}; current RTL changes are not yet remeasured."
+        )
+        for relative in FACT_DOCUMENTS:
+            if (root / relative).read_text(encoding="utf-8").count(notice) != 1:
+                raise ContractError(f"{relative}: missing historical measurement notice")
     for key in FACT_KEYS:
         values = {relative: facts[key] for relative, facts in documents.items()}
         if len(set(values.values())) != 1:
