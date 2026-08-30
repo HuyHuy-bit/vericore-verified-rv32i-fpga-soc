@@ -11,6 +11,13 @@ CPU_SRCS = rtl/rv32i_pkg.sv \
            rtl/core/ras.sv rtl/core/csr.sv rtl/memory/mem_timing.sv rtl/memory/icache.sv \
            rtl/memory/lsu.sv rtl/memory/dcache.sv rtl/core/perf_counters.sv
 
+SOC_CORE_SRCS = $(filter-out rtl/core/cpu.sv rtl/memory/instr_mem.sv \
+                rtl/memory/data_mem.sv rtl/memory/mem_timing.sv,$(CPU_SRCS))
+SOC_SRCS = $(SOC_CORE_SRCS) rtl/bus/wb_master_adapter.sv rtl/bus/wb_arbiter.sv \
+           rtl/soc/wb_interconnect.sv rtl/soc/wb_imem.sv rtl/soc/wb_dmem.sv \
+           rtl/soc/uart_tx.sv rtl/soc/wb_uart.sv rtl/soc/button_debounce.sv \
+           rtl/soc/wb_gpio_irq.sv rtl/soc/rv32i_soc.sv
+
 # Cache/latency configuration. Defaults match the plain no-cache build so
 # `make all` with no arguments behaves exactly as before.
 IC_BYTES ?= 0
@@ -26,6 +33,14 @@ BTB_IDX_BITS ?= 6
 BTB_TAG_BITS ?= 10
 GSHARE ?= 0
 RAS_DEPTH ?= 8
+
+SOC_BUILD_DIR ?= build/soc
+SOC_GCC ?= riscv64-unknown-elf-gcc
+SOC_MARCH ?= rv32i_zicsr_zifencei
+SOC_ELF = $(SOC_BUILD_DIR)/firmware.elf
+SOC_IMEM = $(SOC_BUILD_DIR)/firmware-imem.hex
+SOC_DMEM = $(SOC_BUILD_DIR)/firmware-dmem.hex
+SOC_MANIFEST = $(SOC_BUILD_DIR)/firmware-images.json
 
 GPARAMS  = -GIMEM_LATENCY=$(IMEM_LAT) -GDMEM_LATENCY=$(DMEM_LAT) \
            -GICACHE_BYTES=$(IC_BYTES) -GICACHE_BLOCK_WORDS=$(IC_BLOCK) -GICACHE_WAYS=$(IC_WAYS) \
@@ -57,7 +72,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-firmware
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -108,6 +123,22 @@ unit:
 	@tools/run_unit.sh button_debounce
 	@tools/run_unit.sh wb_gpio_irq
 	@tools/run_unit.sh reset_controller
+	@tools/run_unit.sh soc_smoke
+	@python3 -m unittest -v tools.test_soc_image
+
+soc-image-test:
+	python3 -m unittest -v tools.test_soc_image
+
+soc-firmware:
+	mkdir -p "$(SOC_BUILD_DIR)"
+	$(SOC_GCC) -march=$(SOC_MARCH) -mabi=ilp32 \
+		-nostdlib -ffreestanding -fno-builtin -fno-pic -mno-relax -Os \
+		-ffunction-sections -fdata-sections -msmall-data-limit=0 \
+		-fno-asynchronous-unwind-tables -fno-unwind-tables \
+		-Wl,-T,firmware/link.ld -Wl,--gc-sections -Wl,--build-id=none \
+		-Wl,--no-relax -o "$(SOC_ELF)" firmware/start.S firmware/demo.c
+	python3 tools/soc_image.py --elf "$(SOC_ELF)" --imem "$(SOC_IMEM)" \
+		--dmem "$(SOC_DMEM)" --manifest "$(SOC_MANIFEST)"
 
 # Run every test and print a summary.
 test: sim assemble memtiming
@@ -212,6 +243,7 @@ lint:
 	verilator --lint-only -Wall --top-module button_debounce rtl/verilator.vlt rtl/soc/button_debounce.sv
 	verilator --lint-only -Wall --top-module wb_gpio_irq rtl/verilator.vlt rtl/soc/wb_gpio_irq.sv
 	verilator --lint-only -Wall --top-module reset_controller rtl/verilator.vlt rtl/soc/reset_controller.sv
+	verilator --lint-only -Wall --top-module rv32i_soc rtl/verilator.vlt $(SOC_SRCS)
 
 # Open a specific test waveform: make wave TEST=t04_branch
 TEST ?= t01_rtype

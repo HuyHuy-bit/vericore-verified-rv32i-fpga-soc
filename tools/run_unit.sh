@@ -97,6 +97,44 @@ if [[ $# -eq 1 ]]; then
                 "$repo_root/rtl/soc/reset_controller.sv" \
                 "$repo_root/sim/unit/reset_controller_tb.sv"
             ;;
+        soc_smoke)
+            unit_runtime_args=("+IMEMFILE=$repo_root/sim/fixtures/soc_selfloop.hex")
+            set -- soc_smoke_tb \
+                "$repo_root/rtl/rv32i_pkg.sv" \
+                "$repo_root/rtl/core/rv32i_core.sv" \
+                "$repo_root/rtl/core/frontend.sv" \
+                "$repo_root/rtl/core/backend.sv" \
+                "$repo_root/rtl/core/pc.sv" \
+                "$repo_root/rtl/core/reg_file.sv" \
+                "$repo_root/rtl/core/imm_gen.sv" \
+                "$repo_root/rtl/core/alu.sv" \
+                "$repo_root/rtl/core/control.sv" \
+                "$repo_root/rtl/core/branch_unit.sv" \
+                "$repo_root/rtl/core/if_id_reg.sv" \
+                "$repo_root/rtl/core/id_ex_reg.sv" \
+                "$repo_root/rtl/core/ex_mem_reg.sv" \
+                "$repo_root/rtl/core/mem_wb_reg.sv" \
+                "$repo_root/rtl/core/forwarding_unit.sv" \
+                "$repo_root/rtl/core/hazard_detect.sv" \
+                "$repo_root/rtl/core/branch_predictor.sv" \
+                "$repo_root/rtl/core/ras.sv" \
+                "$repo_root/rtl/core/csr.sv" \
+                "$repo_root/rtl/memory/icache.sv" \
+                "$repo_root/rtl/memory/lsu.sv" \
+                "$repo_root/rtl/memory/dcache.sv" \
+                "$repo_root/rtl/core/perf_counters.sv" \
+                "$repo_root/rtl/bus/wb_master_adapter.sv" \
+                "$repo_root/rtl/bus/wb_arbiter.sv" \
+                "$repo_root/rtl/soc/wb_interconnect.sv" \
+                "$repo_root/rtl/soc/wb_imem.sv" \
+                "$repo_root/rtl/soc/wb_dmem.sv" \
+                "$repo_root/rtl/soc/uart_tx.sv" \
+                "$repo_root/rtl/soc/wb_uart.sv" \
+                "$repo_root/rtl/soc/button_debounce.sv" \
+                "$repo_root/rtl/soc/wb_gpio_irq.sv" \
+                "$repo_root/rtl/soc/rv32i_soc.sv" \
+                "$repo_root/sim/unit/soc_smoke_tb.sv"
+            ;;
     esac
 fi
 

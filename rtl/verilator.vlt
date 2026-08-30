@@ -26,6 +26,7 @@ lint_off -rule IMPORTSTAR -file "*/reg_file.sv"
 lint_off -rule IMPORTSTAR -file "*/perf_counters.sv"
 lint_off -rule IMPORTSTAR -file "*/cpu.sv"
 lint_off -rule IMPORTSTAR -file "*/rv32i_core.sv"
+lint_off -rule IMPORTSTAR -file "*/rv32i_soc.sv"
 
 lint_off -rule UNUSEDSIGNAL -file "*/cpu.sv" -match "*retired_debug*"
 

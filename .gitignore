@@ -2,6 +2,7 @@
 obj_dir*/
 coverage/
 work/
+build/soc/
 transcript
 xsim.dir/
 csrc/

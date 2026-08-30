@@ -5,6 +5,7 @@ docs/superpowers/
 .verify-cache/
 .portfolio-runs/
 graphify-out/
+build/soc/
 obj_dir*/
 coverage/
 synthesis/reports/
