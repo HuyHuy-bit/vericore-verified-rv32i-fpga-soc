@@ -71,6 +71,32 @@ if [[ $# -eq 1 ]]; then
                 "$repo_root/rtl/soc/wb_dmem.sv" \
                 "$repo_root/sim/unit/wb_memory_tb.sv"
             ;;
+        uart_tx)
+            set -- uart_tx_tb \
+                "$repo_root/rtl/soc/uart_tx.sv" \
+                "$repo_root/sim/unit/uart_tx_tb.sv"
+            ;;
+        wb_uart)
+            set -- wb_uart_tb \
+                "$repo_root/rtl/soc/uart_tx.sv" \
+                "$repo_root/rtl/soc/wb_uart.sv" \
+                "$repo_root/sim/unit/wb_uart_tb.sv"
+            ;;
+        button_debounce)
+            set -- button_debounce_tb \
+                "$repo_root/rtl/soc/button_debounce.sv" \
+                "$repo_root/sim/unit/button_debounce_tb.sv"
+            ;;
+        wb_gpio_irq)
+            set -- wb_gpio_irq_tb \
+                "$repo_root/rtl/soc/wb_gpio_irq.sv" \
+                "$repo_root/sim/unit/wb_gpio_irq_tb.sv"
+            ;;
+        reset_controller)
+            set -- reset_controller_tb \
+                "$repo_root/rtl/soc/reset_controller.sv" \
+                "$repo_root/sim/unit/reset_controller_tb.sv"
+            ;;
     esac
 fi
 

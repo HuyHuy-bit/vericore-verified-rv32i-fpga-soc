@@ -103,6 +103,11 @@ unit:
 	@tools/run_unit.sh wb_arbiter
 	@tools/run_unit.sh wb_interconnect
 	@tools/run_unit.sh wb_memory
+	@tools/run_unit.sh uart_tx
+	@tools/run_unit.sh wb_uart
+	@tools/run_unit.sh button_debounce
+	@tools/run_unit.sh wb_gpio_irq
+	@tools/run_unit.sh reset_controller
 
 # Run every test and print a summary.
 test: sim assemble memtiming
@@ -202,6 +207,11 @@ lint:
 	verilator --lint-only -Wall --top-module wb_interconnect rtl/verilator.vlt rtl/soc/wb_interconnect.sv
 	verilator --lint-only -Wall --top-module wb_imem rtl/verilator.vlt rtl/soc/wb_imem.sv
 	verilator --lint-only -Wall --top-module wb_dmem rtl/verilator.vlt rtl/soc/wb_dmem.sv
+	verilator --lint-only -Wall --top-module uart_tx rtl/verilator.vlt rtl/soc/uart_tx.sv
+	verilator --lint-only -Wall --top-module wb_uart rtl/verilator.vlt rtl/soc/uart_tx.sv rtl/soc/wb_uart.sv
+	verilator --lint-only -Wall --top-module button_debounce rtl/verilator.vlt rtl/soc/button_debounce.sv
+	verilator --lint-only -Wall --top-module wb_gpio_irq rtl/verilator.vlt rtl/soc/wb_gpio_irq.sv
+	verilator --lint-only -Wall --top-module reset_controller rtl/verilator.vlt rtl/soc/reset_controller.sv
 
 # Open a specific test waveform: make wave TEST=t04_branch
 TEST ?= t01_rtype
