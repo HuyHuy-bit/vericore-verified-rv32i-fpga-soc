@@ -96,12 +96,13 @@ memtiming:
 unit:
 	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/core/control.sv sim/unit/control_tb.sv
 	@tools/run_unit.sh hazard_detect_tb rtl/core/hazard_detect.sv sim/unit/hazard_detect_tb.sv
-	@tools/run_unit.sh dcache_counter_tb rtl/rv32i_pkg.sv rtl/memory/dcache.sv sim/unit/dcache_counter_tb.sv
+	@tools/run_unit.sh dcache_counter
 	@tools/run_unit.sh core_external
 	@tools/run_unit.sh csr_external_irq
 	@tools/run_unit.sh wb_master_adapter
 	@tools/run_unit.sh wb_arbiter
 	@tools/run_unit.sh wb_interconnect
+	@tools/run_unit.sh wb_memory
 
 # Run every test and print a summary.
 test: sim assemble memtiming
@@ -199,6 +200,8 @@ lint:
 	verilator --lint-only -Wall --top-module wb_master_adapter rtl/verilator.vlt rtl/bus/wb_master_adapter.sv
 	verilator --lint-only -Wall --top-module wb_arbiter rtl/verilator.vlt rtl/bus/wb_arbiter.sv
 	verilator --lint-only -Wall --top-module wb_interconnect rtl/verilator.vlt rtl/soc/wb_interconnect.sv
+	verilator --lint-only -Wall --top-module wb_imem rtl/verilator.vlt rtl/soc/wb_imem.sv
+	verilator --lint-only -Wall --top-module wb_dmem rtl/verilator.vlt rtl/soc/wb_dmem.sv
 
 # Open a specific test waveform: make wave TEST=t04_branch
 TEST ?= t01_rtype

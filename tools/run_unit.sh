@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+unit_runtime_args=()
+
 if [[ $# -eq 1 ]]; then
     unit_name=$1
     repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -38,6 +40,12 @@ if [[ $# -eq 1 ]]; then
                 "$repo_root/rtl/core/csr.sv" \
                 "$repo_root/sim/unit/csr_external_irq_tb.sv"
             ;;
+        dcache_counter)
+            set -- dcache_counter_tb \
+                "$repo_root/rtl/rv32i_pkg.sv" \
+                "$repo_root/rtl/memory/dcache.sv" \
+                "$repo_root/sim/unit/dcache_counter_tb.sv"
+            ;;
         wb_master_adapter)
             set -- wb_master_adapter_tb \
                 "$repo_root/rtl/bus/wb_master_adapter.sv" \
@@ -52,6 +60,16 @@ if [[ $# -eq 1 ]]; then
             set -- wb_interconnect_tb \
                 "$repo_root/rtl/soc/wb_interconnect.sv" \
                 "$repo_root/sim/unit/wb_interconnect_tb.sv"
+            ;;
+        wb_memory)
+            unit_runtime_args=(
+                "+IMEMFILE=$repo_root/sim/fixtures/wb_memory.hex"
+                "+DMEMFILE=$repo_root/sim/fixtures/wb_memory.hex"
+            )
+            set -- wb_memory_tb \
+                "$repo_root/rtl/soc/wb_imem.sv" \
+                "$repo_root/rtl/soc/wb_dmem.sv" \
+                "$repo_root/sim/unit/wb_memory_tb.sv"
             ;;
     esac
 fi
@@ -72,4 +90,4 @@ trap 'rm -rf -- "$unit_build_dir"' EXIT
 
 verilator --binary --assert --timing -j 0 \
     --Mdir "$unit_build_dir" --top-module "$top" "$@"
-"$unit_build_dir/V$top"
+"$unit_build_dir/V$top" "${unit_runtime_args[@]}"

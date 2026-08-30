@@ -10,6 +10,8 @@ module rv32i_core #(
     parameter int DCACHE_BLOCK_WORDS = 4,
     parameter int DCACHE_WAYS        = 1,
     parameter int DCACHE_WRITE_BACK  = 0,
+    parameter logic [XLEN-1:0] DCACHEABLE_BASE = '0,
+    parameter logic [XLEN-1:0] DCACHEABLE_MASK = '0,
     parameter int BTB_IDX_BITS       = 6,
     parameter int BTB_TAG_BITS       = 10,
     parameter int GSHARE             = 0,
@@ -86,7 +88,9 @@ module rv32i_core #(
         .DCACHE_BYTES(DCACHE_BYTES),
         .DCACHE_BLOCK_WORDS(DCACHE_BLOCK_WORDS),
         .DCACHE_WAYS(DCACHE_WAYS),
-        .DCACHE_WRITE_BACK(DCACHE_WRITE_BACK)
+        .DCACHE_WRITE_BACK(DCACHE_WRITE_BACK),
+        .DCACHEABLE_BASE(DCACHEABLE_BASE),
+        .DCACHEABLE_MASK(DCACHEABLE_MASK)
     ) u_backend (
         .clk(clk), .rst(rst), .irq_external(irq_external),
         .pipe_stall(pipe_stall), .if_id_q(if_id_q),
