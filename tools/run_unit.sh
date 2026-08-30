@@ -38,6 +38,21 @@ if [[ $# -eq 1 ]]; then
                 "$repo_root/rtl/core/csr.sv" \
                 "$repo_root/sim/unit/csr_external_irq_tb.sv"
             ;;
+        wb_master_adapter)
+            set -- wb_master_adapter_tb \
+                "$repo_root/rtl/bus/wb_master_adapter.sv" \
+                "$repo_root/sim/unit/wb_master_adapter_tb.sv"
+            ;;
+        wb_arbiter)
+            set -- wb_arbiter_tb \
+                "$repo_root/rtl/bus/wb_arbiter.sv" \
+                "$repo_root/sim/unit/wb_arbiter_tb.sv"
+            ;;
+        wb_interconnect)
+            set -- wb_interconnect_tb \
+                "$repo_root/rtl/soc/wb_interconnect.sv" \
+                "$repo_root/sim/unit/wb_interconnect_tb.sv"
+            ;;
     esac
 fi
 

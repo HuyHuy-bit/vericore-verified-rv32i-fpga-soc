@@ -99,6 +99,9 @@ unit:
 	@tools/run_unit.sh dcache_counter_tb rtl/rv32i_pkg.sv rtl/memory/dcache.sv sim/unit/dcache_counter_tb.sv
 	@tools/run_unit.sh core_external
 	@tools/run_unit.sh csr_external_irq
+	@tools/run_unit.sh wb_master_adapter
+	@tools/run_unit.sh wb_arbiter
+	@tools/run_unit.sh wb_interconnect
 
 # Run every test and print a summary.
 test: sim assemble memtiming
@@ -193,6 +196,9 @@ bench: sim
 # Lint only — quick syntax/structure check, -Wall with a documented waiver file.
 lint:
 	verilator --lint-only -Wall --top-module $(TOP) rtl/verilator.vlt $(CPU_SRCS)
+	verilator --lint-only -Wall --top-module wb_master_adapter rtl/verilator.vlt rtl/bus/wb_master_adapter.sv
+	verilator --lint-only -Wall --top-module wb_arbiter rtl/verilator.vlt rtl/bus/wb_arbiter.sv
+	verilator --lint-only -Wall --top-module wb_interconnect rtl/verilator.vlt rtl/soc/wb_interconnect.sv
 
 # Open a specific test waveform: make wave TEST=t04_branch
 TEST ?= t01_rtype
