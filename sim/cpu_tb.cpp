@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
             std::cerr << "error: signature range must satisfy start < end\n";
             return 1;
         }
-        const size_t dmem_words = top->rootp->cpu__DOT__u_backend__DOT__u_data_mem__DOT__mem_array.size();
+        const size_t dmem_words = top->rootp->cpu__DOT__u_data_mem__DOT__mem_array.size();
         if (sigend > dmem_words) {
             std::cerr << "error: signature end exceeds data memory word count: "
                       << sigend << " > " << dmem_words << "\n";
@@ -260,19 +260,19 @@ int main(int argc, char** argv) {
     const uint64_t run_limit = mode == RunMode::Snapshot ? cycles : uint64_t{cycles} * 50 + 1000;
     for (; ran < run_limit; ++ran) {
         tick();
-        if (top->rootp->cpu__DOT__u_backend__DOT__rvfi_valid) {
+        if (top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__rvfi_valid) {
             if (!rvfifile.empty()) rvfi_log.push_back({
-                static_cast<uint32_t>(top->rootp->cpu__DOT__u_backend__DOT__rvfi_pc),
-                static_cast<uint32_t>(top->rootp->cpu__DOT__u_backend__DOT__rvfi_insn),
-                static_cast<uint32_t>(top->rootp->cpu__DOT__u_backend__DOT__rvfi_rd_addr),
-                static_cast<uint32_t>(top->rootp->cpu__DOT__u_backend__DOT__rvfi_rd_wdata)});
-            if (mode == RunMode::SelfLoop && static_cast<uint32_t>(top->rootp->cpu__DOT__u_backend__DOT__rvfi_insn) == 0x0000006f) {
+                static_cast<uint32_t>(top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__rvfi_pc),
+                static_cast<uint32_t>(top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__rvfi_insn),
+                static_cast<uint32_t>(top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__rvfi_rd_addr),
+                static_cast<uint32_t>(top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__rvfi_rd_wdata)});
+            if (mode == RunMode::SelfLoop && static_cast<uint32_t>(top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__rvfi_insn) == 0x0000006f) {
                 terminal = true; ++ran; break;
             }
         }
-        if (mode == RunMode::Tohost && top->rootp->cpu__DOT__u_backend__DOT__tohost_valid) {
+        if (mode == RunMode::Tohost && top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__tohost_valid) {
             terminal = true;
-            tohost_code = static_cast<uint32_t>(top->rootp->cpu__DOT__u_backend__DOT__tohost_data);
+            tohost_code = static_cast<uint32_t>(top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__tohost_data);
             ++ran;
             break;
         }
@@ -321,7 +321,7 @@ int main(int argc, char** argv) {
         if (!signature) fail("cannot open signature output: " + sigfile);
         else {
             for (uint32_t i = sigstart; i < sigend; ++i) signature << std::hex << std::setw(8) << std::setfill('0')
-                << top->rootp->cpu__DOT__u_backend__DOT__u_data_mem__DOT__mem_array[i] << "\n";
+                << top->rootp->cpu__DOT__u_data_mem__DOT__mem_array[i] << "\n";
             signature.flush();
             if (!signature) fail("failed writing signature output: " + sigfile);
             else std::cout << "Signature dumped: " << (sigend - sigstart) << " words -> " << sigfile << "\n";
@@ -329,7 +329,7 @@ int main(int argc, char** argv) {
     }
 
     uint32_t regs[32] = {};
-    for (int i = 1; i < 32; ++i) regs[i] = top->rootp->cpu__DOT__u_backend__DOT__u_reg_file__DOT__reg_array[i];
+    for (int i = 1; i < 32; ++i) regs[i] = top->rootp->cpu__DOT__u_core__DOT__u_backend__DOT__u_reg_file__DOT__reg_array[i];
     if (mode == RunMode::Snapshot) std::cout << "SNAPSHOT DEBUG RUN (non-verifying) after " << ran << " cycles\n";
     else if (mode == RunMode::Tohost && terminal) std::cout << "Test signalled completion via tohost: code=0x" << std::hex << tohost_code << std::dec << "\n";
     else if (mode == RunMode::SelfLoop && terminal) std::cout << "Test completed via retired self-loop sentinel\n";

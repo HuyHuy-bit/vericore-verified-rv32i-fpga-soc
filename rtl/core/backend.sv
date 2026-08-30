@@ -12,12 +12,11 @@ module backend #(
     parameter int DCACHE_BYTES       = 0,
     parameter int DCACHE_BLOCK_WORDS = 4,
     parameter int DCACHE_WAYS        = 1,
-    parameter int DCACHE_WRITE_BACK  = 0,
-    parameter int DMEM_LATENCY       = 1,
-    parameter int DMEM_DEPTH_WORDS   = 16384
+    parameter int DCACHE_WRITE_BACK  = 0
 ) (
     input  var logic        clk,
     input  var logic        rst,
+    input  var logic        irq_external,
     input  var logic        pipe_stall,
     input  var if_id_t      if_id_q,          // payload from the front end
 
@@ -51,7 +50,15 @@ module backend #(
     input  var logic [XLEN-1:0] perf_instr_retired,
 
     input  var logic        dbg_flush,
-    output var logic        dbg_flush_done
+    output var logic        dbg_flush_done,
+
+    output var logic        ext_dmem_req,
+    output var logic        ext_dmem_burst,
+    output var logic [XLEN-1:0] ext_dmem_addr,
+    output var logic [XBYTES-1:0] ext_dmem_wstrb,
+    output var logic [XLEN-1:0] ext_dmem_wdata,
+    input  var logic [XLEN-1:0] ext_dmem_rdata,
+    input  var logic        ext_dmem_ready
 );
 
     // ID stage
@@ -403,6 +410,14 @@ ex_mem_t ex_mem_d, ex_mem_q;
     logic [XBYTES-1:0] dc_mem_byte_en;
     logic        dc_mem_req, dc_mem_burst, dc_mem_ready;
 
+    assign ext_dmem_req   = dc_mem_req;
+    assign ext_dmem_burst = dc_mem_burst;
+    assign ext_dmem_addr  = dc_mem_addr;
+    assign ext_dmem_wstrb = dc_mem_byte_en;
+    assign ext_dmem_wdata = dc_mem_write_word;
+    assign dc_mem_read_word = ext_dmem_rdata;
+    assign dc_mem_ready = ext_dmem_ready;
+
     if (DCACHE_BYTES == 0) begin : g_no_dcache
         assign dc_mem_addr       = ex_mem_q.alu_result;
         assign dc_mem_req        = dmem_req;
@@ -432,14 +447,6 @@ ex_mem_t ex_mem_d, ex_mem_q;
             .access(dcache_access), .miss_pulse(dcache_miss)
         );
     end
-
-    data_mem #(.LATENCY(DMEM_LATENCY), .DEPTH_WORDS(DMEM_DEPTH_WORDS)) u_data_mem (
-        .clk(clk), .rst(rst),
-        .req(dc_mem_req), .burst(dc_mem_burst),
-        .addr(dc_mem_addr),
-        .byte_en(dc_mem_byte_en), .write_word(dc_mem_write_word),
-        .read_word(dc_mem_read_word), .ready(dc_mem_ready)
-    );
 
     // ---- Commit point: traps, MRET, and CSR writes all resolve here ----
     // This is the single point where control-flow-changing exceptional events
@@ -536,6 +543,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
         .mtvec_out(mtvec_val),
         .mret_en(mret_take),
         .mepc_out(mepc_val),
+        .irq_external(irq_external),
         .irq_pending(irq_pending), .irq_cause(irq_cause)
     );
 

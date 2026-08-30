@@ -3,7 +3,7 @@ TOP      = cpu
 TB       = sim/cpu_tb.cpp
 
 CPU_SRCS = rtl/rv32i_pkg.sv \
-           rtl/core/cpu.sv rtl/core/frontend.sv rtl/core/backend.sv rtl/core/pc.sv \
+           rtl/core/cpu.sv rtl/core/rv32i_core.sv rtl/core/frontend.sv rtl/core/backend.sv rtl/core/pc.sv \
            rtl/memory/instr_mem.sv rtl/core/reg_file.sv rtl/core/imm_gen.sv \
            rtl/core/alu.sv rtl/core/control.sv rtl/memory/data_mem.sv rtl/core/branch_unit.sv \
            rtl/core/if_id_reg.sv rtl/core/id_ex_reg.sv rtl/core/ex_mem_reg.sv rtl/core/mem_wb_reg.sv \
@@ -97,6 +97,8 @@ unit:
 	@tools/run_unit.sh control_tb rtl/rv32i_pkg.sv rtl/core/control.sv sim/unit/control_tb.sv
 	@tools/run_unit.sh hazard_detect_tb rtl/core/hazard_detect.sv sim/unit/hazard_detect_tb.sv
 	@tools/run_unit.sh dcache_counter_tb rtl/rv32i_pkg.sv rtl/memory/dcache.sv sim/unit/dcache_counter_tb.sv
+	@tools/run_unit.sh core_external
+	@tools/run_unit.sh csr_external_irq
 
 # Run every test and print a summary.
 test: sim assemble memtiming

@@ -15,8 +15,8 @@ EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
 EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
 EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
-EVIDENCE_FACT EVIDENCE_STATUS=current
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT EVIDENCE_STATUS=historical
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
 EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
@@ -29,7 +29,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 </details>
 
 <!-- portfolio:status:start -->
-Current measurements — validated for the checked-out RTL.
+Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
 <!-- portfolio:status:end -->
 
 <!-- portfolio:summary:start -->

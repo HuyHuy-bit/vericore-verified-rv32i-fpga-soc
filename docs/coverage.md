@@ -1,6 +1,6 @@
 # Functional coverage report
 
-**Evidence status: current.**
+**Evidence status: historical.**
 
 **44/44 cover points hit (100.0%)**, from the directed suite and deterministic BTB-alias fixture run against a cache-enabled build (`make coverage`).
 

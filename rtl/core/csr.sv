@@ -30,6 +30,7 @@ module csr (
     output var logic [XLEN-1:0] mepc_out,     // return address -> PC redirect target
 
     // ---- interrupts ----
+    input  var logic        irq_external,
     // irq_pending is the architectural "an interrupt is ready to be taken"
     // condition: enabled globally (mstatus.MIE), enabled individually (mie),
     // and actually asserted (mip). The commit point decides *when* to act on
@@ -53,9 +54,7 @@ module csr (
         mstatus_val[MSTATUS_MPP_LSB +: 2]      = 2'b11;   // MPP = M, always
     end
 
-    // mie / mip. Only software and timer are implemented; the external bit
-    // reads 0 because nothing drives it.
-    logic mie_msie, mie_mtie;
+    logic mie_msie, mie_mtie, mie_meie;
     logic mip_msip;                 // software interrupt: set by software
     logic [XLEN-1:0] mie_val, mip_val;
 
@@ -80,15 +79,22 @@ module csr (
         mie_val = XLEN'(0);
         mie_val[IRQ_S_BIT] = mie_msie;
         mie_val[IRQ_T_BIT] = mie_mtie;
+        mie_val[IRQ_E_BIT] = mie_meie;
         mip_val = XLEN'(0);
         mip_val[IRQ_S_BIT] = mip_msip;
         mip_val[IRQ_T_BIT] = mip_mtip;
+        mip_val[IRQ_E_BIT] = irq_external;
     end
 
-    // Timer interrupt outranks software when both are ready. Any fixed order
-    // is spec-legal; this one matches the usual RISC-V implementation.
-    assign irq_pending = mstatus_mie && ((mie_mtie && mip_mtip) || (mie_msie && mip_msip));
-    assign irq_cause   = (mie_mtie && mip_mtip) ? CAUSE_IRQ_TIMER : CAUSE_IRQ_SOFT;
+    logic pending_external, pending_software, pending_timer;
+    assign pending_external = mie_meie && irq_external;
+    assign pending_software = mie_msie && mip_msip;
+    assign pending_timer = mie_mtie && mip_mtip;
+    assign irq_pending = mstatus_mie
+                         && (pending_external || pending_software || pending_timer);
+    assign irq_cause = pending_external ? CAUSE_IRQ_EXTERNAL
+                     : pending_software ? CAUSE_IRQ_SOFT
+                     :                    CAUSE_IRQ_TIMER;
     // mcycle/minstret are R/W in M-mode (software may reinitialize them); a
     // write here only offsets the live counter, no separate storage needed,
     // which keeps a write-then-read round trip trivial to reason about.
@@ -155,6 +161,7 @@ module csr (
             mstatus_mpie    <= 1'b0;
             mie_msie        <= 1'b0;
             mie_mtie        <= 1'b0;
+            mie_meie        <= 1'b0;
             mip_msip        <= 1'b0;
             mtime           <= 64'd0;
             mtimecmp        <= '1;        // never fires until software sets it
@@ -199,6 +206,7 @@ module csr (
                 CSR_MIE: begin
                     mie_msie <= csr_new[IRQ_S_BIT];
                     mie_mtie <= csr_new[IRQ_T_BIT];
+                    mie_meie <= csr_new[IRQ_E_BIT];
                 end
                 // MTIP is a comparison and so is read-only; MSIP is the one
                 // interrupt software raises and clears directly.
@@ -210,6 +218,22 @@ module csr (
         end
         end
     end
+
+`ifndef SYNTHESIS
+    a_meip_reflects_input: assert property (@(posedge clk)
+        mip_val[IRQ_E_BIT] == irq_external);
+    a_external_needs_enable: assert property (@(posedge clk) disable iff (rst)
+        (irq_pending && irq_cause == CAUSE_IRQ_EXTERNAL)
+        |-> (mstatus_mie && pending_external));
+    a_external_priority: assert property (@(posedge clk) disable iff (rst)
+        (mstatus_mie && pending_external)
+        |-> (irq_pending && irq_cause == CAUSE_IRQ_EXTERNAL));
+    a_software_priority: assert property (@(posedge clk) disable iff (rst)
+        (mstatus_mie && !pending_external && pending_software)
+        |-> (irq_pending && irq_cause == CAUSE_IRQ_SOFT));
+    a_mret_restores_mie: assert property (@(posedge clk) disable iff (rst)
+        (mret_en && mstatus_mpie) |=> mstatus_mie);
+`endif
 endmodule
 
 `default_nettype wire

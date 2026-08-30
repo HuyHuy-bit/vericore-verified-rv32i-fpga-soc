@@ -150,18 +150,16 @@ package rv32i_pkg;
     localparam int MSTATUS_MPIE_BIT = 7;
     localparam int MSTATUS_MPP_LSB  = 11;   // 2 bits [12:11]
 
-    // Software and timer only. There is no external-interrupt bit because
-    // nothing would drive it - a declared-but-unused IRQ_E_BIT would be
-    // exactly the kind of dead constant that makes a spec gap look like
-    // an oversight rather than a scoping decision.
     localparam int IRQ_S_BIT = 3;   // software
     localparam int IRQ_T_BIT = 7;   // timer
+    localparam int IRQ_E_BIT = 11;  // external
 
     // ---- Interrupt cause codes (mcause, interrupt bit = 1) ----
     // The MSB of mcause distinguishes an interrupt from an exception; the low
     // bits carry the same numbering as the mie/mip bit positions.
     localparam logic [XLEN-1:0] CAUSE_IRQ_SOFT  = {1'b1, {(XLEN-1){1'b0}}} | XLEN'(IRQ_S_BIT);
     localparam logic [XLEN-1:0] CAUSE_IRQ_TIMER = {1'b1, {(XLEN-1){1'b0}}} | XLEN'(IRQ_T_BIT);
+    localparam logic [XLEN-1:0] CAUSE_IRQ_EXTERNAL = {1'b1, {(XLEN-1){1'b0}}} | XLEN'(IRQ_E_BIT);
 
     // ---- Exception cause codes (mcause, interrupt bit = 0) ----
     localparam logic [XLEN-1:0] CAUSE_MISALIGNED_FETCH = XLEN'(0);

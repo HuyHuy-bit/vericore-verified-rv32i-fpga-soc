@@ -15,8 +15,6 @@ module frontend #(
     parameter int ICACHE_BYTES       = 0,
     parameter int ICACHE_BLOCK_WORDS = 4,
     parameter int ICACHE_WAYS        = 1,
-    parameter int IMEM_LATENCY       = 1,
-    parameter int IMEM_DEPTH_WORDS   = 524288,
     parameter logic [XLEN-1:0] RESET_PC  = '0,
     parameter int BTB_IDX_BITS       = 6,
     parameter int BTB_TAG_BITS       = 10,
@@ -42,9 +40,15 @@ module frontend #(
     input  var logic [XLEN-1:0] bp_update_target,
     input  var logic [GHIST_BITS-1:0] bp_update_ghistory,
 
-    output var if_id_t      if_id_q,          // the decoded-stage payload
-    output var logic        imem_ready,       // 0 = fetch is stalling the pipe
-    output var logic        icache_miss
+    output var if_id_t      if_id_q,
+    output var logic        fetch_ready,
+    output var logic        icache_miss,
+
+    output var logic        imem_req,
+    output var logic        imem_burst,
+    output var logic [XLEN-1:0] imem_addr,
+    input  var logic [ILEN-1:0] imem_rdata,
+    input  var logic        imem_ready
 );
 
     // IF stage
@@ -55,16 +59,12 @@ module frontend #(
     assign pc_plus4_if = pc_out + XLEN'(4);
 
     // Fetch path: optionally through the I-cache, otherwise straight to memory.
-    logic [XLEN-1:0] ic_mem_addr;
-    logic [ILEN-1:0] ic_mem_instr;
-    logic        ic_mem_req, ic_mem_burst, ic_mem_ready;
-
     if (ICACHE_BYTES == 0) begin : g_no_icache
-        assign ic_mem_addr  = pc_out;
-        assign ic_mem_req   = 1'b1;   // bare fetch: every access is independent
-        assign ic_mem_burst = 1'b0;
-        assign instr_if     = ic_mem_instr;
-        assign imem_ready   = ic_mem_ready;
+        assign imem_addr    = pc_out;
+        assign imem_req     = 1'b1;
+        assign imem_burst   = 1'b0;
+        assign instr_if     = imem_rdata;
+        assign fetch_ready  = imem_ready;
         assign icache_miss  = 1'b0;
         // No cache to invalidate: fetch already goes straight to memory, so
         // FENCE.I is a no-op here rather than being silently wrong.
@@ -78,18 +78,12 @@ module frontend #(
         ) u_icache (
             .clk(clk), .rst(rst),
             .invalidate(icache_invalidate),
-            .addr(pc_out), .instr(instr_if), .ready(imem_ready),
-            .mem_addr(ic_mem_addr), .mem_req(ic_mem_req), .mem_burst(ic_mem_burst),
-            .mem_instr(ic_mem_instr), .mem_ready(ic_mem_ready),
+            .addr(pc_out), .instr(instr_if), .ready(fetch_ready),
+            .mem_addr(imem_addr), .mem_req(imem_req), .mem_burst(imem_burst),
+            .mem_instr(imem_rdata), .mem_ready(imem_ready),
             .miss_pulse(icache_miss)
         );
     end
-
-    instr_mem #(.LATENCY(IMEM_LATENCY), .DEPTH_WORDS(IMEM_DEPTH_WORDS)) u_instr_mem (
-        .clk(clk), .rst(rst),
-        .req(ic_mem_req), .burst(ic_mem_burst),
-        .addr(ic_mem_addr), .instr(ic_mem_instr), .ready(ic_mem_ready)
-    );
 
     // Front-end branch prediction: index BHT+BTB with the fetch PC. On a
     // predicted-taken hit we redirect the very next fetch to the cached
