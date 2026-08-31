@@ -56,8 +56,14 @@ if {$wns < 0.0} {
 }
 set timing_checks [check_timing -return_string \
     -override_defaults {no_clock unconstrained_internal_endpoints}]
-if {[regexp -nocase {There are [1-9][0-9]* [^\n]*no clock} $timing_checks]
-    || [regexp -nocase {There are [1-9][0-9]* [^\n]*unconstrained} $timing_checks]} {
+puts $timing_checks
+if {![regexp -nocase {checking no_clock \(([0-9]+)\)} \
+        $timing_checks unused no_clock_count]
+    || ![regexp -nocase {checking unconstrained_internal_endpoints \(([0-9]+)\)} \
+        $timing_checks unused unconstrained_count]} {
+    error "timing constraint checks are missing"
+}
+if {$no_clock_count != 0 || $unconstrained_count != 0} {
     error "unconstrained timing endpoint found"
 }
 set severe_drc [get_drc_violations -quiet \

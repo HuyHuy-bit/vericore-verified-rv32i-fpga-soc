@@ -272,8 +272,9 @@ class BoardRunnerTest(unittest.TestCase):
             "printf 'part=%s\\ninput_clock_period_ns=%s\\nsoc_clock_period_ns=%s\\nwns_ns=%s\\ntop=%s\\n' \"$part\" \"$input_period\" \"$soc_period\" \"$wns\" \"$top\" > \"$out/build_meta.txt\"\n"
             "[ \"$mode\" != missing_meta ] || rm -f \"$out/build_meta.txt\"\n"
             "[ \"$mode\" = missing_util ] || printf '| Slice LUTs | 1 |\\n' > \"$out/utilization.rpt\"\n"
-            "[ \"$mode\" = missing_timing ] || printf 'WNS(ns) 0.250\\n' > \"$out/timing_summary.rpt\"\n"
-            "[ \"$mode\" = unconstrained ] && printf 'Unconstrained Paths 1\\n' >> \"$out/timing_summary.rpt\"\n"
+            "[ \"$mode\" = missing_timing ] || printf 'WNS(ns) 0.250\\nchecking no_clock (0)\\nchecking unconstrained_internal_endpoints (0)\\n' > \"$out/timing_summary.rpt\"\n"
+            "[ \"$mode\" != unconstrained ] || sed -i 's/unconstrained_internal_endpoints (0)/unconstrained_internal_endpoints (1)/' \"$out/timing_summary.rpt\"\n"
+            "[ \"$mode\" != missing_constraint_checks ] || sed -i '/checking /d' \"$out/timing_summary.rpt\"\n"
             "[ \"$mode\" = missing_drc ] || printf 'DRC clean\\n' > \"$out/drc.rpt\"\n"
             "[ \"$mode\" = drc_error ] && printf 'CRITICAL WARNING test\\n' > \"$out/drc.rpt\"\n"
             "[ \"$mode\" = missing_bitstream ] || printf 'bitstream\\n' > \"$out/rv32i-soc-arty-a7-35t.bit\"\n"
@@ -409,6 +410,7 @@ class BoardRunnerTest(unittest.TestCase):
             "negative_wns": "negative WNS",
             "wrong_top": "wrong applied top",
             "unconstrained": "unconstrained timing",
+            "missing_constraint_checks": "timing constraint checks are missing",
             "drc_error": "DRC contains",
         }
         for mode, diagnostic in cases.items():

@@ -131,6 +131,25 @@ def read_build_metadata(path: Path) -> tuple[str, float, float, float, str]:
     return values["part"], input_period, soc_period, wns, values["top"]
 
 
+def validate_timing_constraints(report: str) -> None:
+    counts: dict[str, list[int]] = {}
+    for name in ("no_clock", "unconstrained_internal_endpoints"):
+        counts[name] = [
+            int(value)
+            for value in re.findall(
+                rf"^\s*(?:[0-9]+\.\s+)?checking\s+{name}\s+\(([0-9]+)\)\s*$",
+                report,
+                re.IGNORECASE | re.MULTILINE,
+            )
+        ]
+    if any(not values for values in counts.values()):
+        raise BoardError("timing constraint checks are missing")
+    if any(counts["no_clock"]):
+        raise BoardError("unclocked timing endpoint reported")
+    if any(counts["unconstrained_internal_endpoints"]):
+        raise BoardError("unconstrained timing endpoint reported")
+
+
 def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts, float]:
     artifacts = BoardArtifacts(
         bitstream=directory / "rv32i-soc-arty-a7-35t.bit",
@@ -163,8 +182,7 @@ def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts,
     if top != "arty_a7_35t_top":
         raise BoardError(f"wrong applied top: {top}")
     timing = artifacts.timing.read_text(encoding="utf-8", errors="replace")
-    if re.search(r"unconstrained[^\n]*[1-9]", timing, re.IGNORECASE):
-        raise BoardError("unconstrained timing endpoint reported")
+    validate_timing_constraints(timing)
     drc = artifacts.drc.read_text(encoding="utf-8", errors="replace")
     if re.search(r"\b(?:CRITICAL WARNING|ERROR)\b", drc, re.IGNORECASE):
         raise BoardError("DRC contains a critical warning or error")
