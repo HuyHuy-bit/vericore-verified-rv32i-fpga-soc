@@ -96,6 +96,11 @@ module wb_master_adapter_tb;
         end
         finish_ack(32'h1234_5678);
 
+        start_request(32'h0000_0241, 4'b0000, 32'h0);
+        check(wb_adr == 32'h0000_0240,
+              "subword read did not align the Wishbone word address");
+        finish_ack(32'h3233_7672);
+
         start_request(32'h1000_0000, 4'b0100, 32'h00aa_0000);
         check(wb_we && wb_sel == 4'b0100, "byte write controls incorrect");
         check(wb_dat_w == 32'h00aa_0000, "byte write data mismatch");

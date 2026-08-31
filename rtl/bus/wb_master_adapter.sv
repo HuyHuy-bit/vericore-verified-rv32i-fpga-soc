@@ -37,7 +37,7 @@ module wb_master_adapter (
             if (state == IDLE) begin
                 if (src_req) begin
                     state <= ACTIVE;
-                    addr_q <= src_addr;
+                    addr_q <= src_addr & 32'hffff_fffc;
                     wdata_q <= src_wdata;
                     wstrb_q <= src_wstrb;
                 end

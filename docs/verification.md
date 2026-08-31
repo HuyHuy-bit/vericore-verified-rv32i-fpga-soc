@@ -71,7 +71,7 @@ Spike itself is pinned in CI to the exact commit these results were measured aga
 
 **25 concurrent properties** are built into every simulator via `--assert`, and **2 immediate assertions** enforce both directions of the load-use dependency/stall equivalence. They sit beside the logic they constrain: next-PC priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall boundedness at the top level, and hazard soundness/completeness in `hazard_detect.sv`.
 
-The interrupt properties are the sharpest: an interrupt resumes at `pc+4` while a trap re-runs the faulting instruction, so `a_irq_mepc_is_next` and `a_trap_mepc_is_faulting` pin down both directions — getting them backwards silently drops or repeats work.
+The interrupt properties are the sharpest: an interrupt resumes at the retired instruction's architectural successor while a trap re-runs the faulting instruction, so `a_irq_mepc_is_next` and `a_trap_mepc_is_faulting` pin down both directions — getting them backwards silently drops or repeats work.
 
 **Catches:** any change violating an invariant, immediately, in any test.
 **Doesn't catch:** anything not expressed as a property. Three were found mis-specified during authoring (not RTL bugs) and corrected against the RTL's actual behaviour, not the reverse.

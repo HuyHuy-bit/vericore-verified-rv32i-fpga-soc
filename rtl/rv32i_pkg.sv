@@ -245,7 +245,7 @@ package rv32i_pkg;
     } id_ex_t;
 
     typedef struct packed {
-        logic [XLEN-1:0] alu_result, rs2_data, pc_plus4;
+        logic [XLEN-1:0] alu_result, rs2_data, pc_plus4, next_pc;
         logic [4:0]  rd_addr;
         logic [2:0]  funct3;
         logic        reg_write_en, mem_write, mem_read;

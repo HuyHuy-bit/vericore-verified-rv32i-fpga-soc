@@ -41,6 +41,14 @@ SOC_ELF = $(SOC_BUILD_DIR)/firmware.elf
 SOC_IMEM = $(SOC_BUILD_DIR)/firmware-imem.hex
 SOC_DMEM = $(SOC_BUILD_DIR)/firmware-dmem.hex
 SOC_MANIFEST = $(SOC_BUILD_DIR)/firmware-images.json
+SOC_BOARD_DIR ?= $(SOC_BUILD_DIR)/board
+SOC_BITSTREAM ?= $(SOC_BOARD_DIR)/rv32i-soc-arty-a7-35t.bit
+SOC_RTL_COMMIT ?=
+SOC_SIM_DIR ?= obj_dir_soc
+SOC_SIM = $(SOC_SIM_DIR)/Vrv32i_soc
+SOC_UNIT_NAMES := core_external csr_external_irq wb_master_adapter wb_arbiter \
+                  wb_interconnect wb_memory dcache_counter uart_tx wb_uart \
+                  button_debounce wb_gpio_irq reset_controller soc_smoke
 
 GPARAMS  = -GIMEM_LATENCY=$(IMEM_LAT) -GDMEM_LATENCY=$(DMEM_LAT) \
            -GICACHE_BYTES=$(IC_BYTES) -GICACHE_BLOCK_WORDS=$(IC_BLOCK) -GICACHE_WAYS=$(IC_WAYS) \
@@ -72,7 +80,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-firmware
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-firmware soc-unit soc-sim soc-lint soc-board-test soc-check soc-bitstream soc-program
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -140,6 +148,41 @@ soc-firmware:
 	python3 tools/soc_image.py --elf "$(SOC_ELF)" --imem "$(SOC_IMEM)" \
 		--dmem "$(SOC_DMEM)" --manifest "$(SOC_MANIFEST)"
 
+soc-unit:
+	@for name in $(SOC_UNIT_NAMES); do tools/run_unit.sh "$$name"; done
+
+$(SOC_SIM): $(SOC_SRCS) sim/soc_tb.cpp
+	verilator --cc --exe --build --assert --timing -j 0 \
+		--Mdir "$(SOC_SIM_DIR)" --top-module rv32i_soc \
+		-GCLOCK_HZ=80 -GUART_BAUD=10 -GDEBOUNCE_CYCLES=4 \
+		-GIMEM_DEPTH_WORDS=8192 -GDMEM_DEPTH_WORDS=8192 \
+		rtl/verilator.vlt $(SOC_SRCS) sim/soc_tb.cpp
+
+soc-sim: soc-firmware $(SOC_SIM)
+	./$(SOC_SIM) +IMEMFILE="$(SOC_IMEM)" +DMEMFILE="$(SOC_DMEM)"
+
+soc-lint:
+	verilator --lint-only --timing -Wall -Wno-fatal --top-module rv32i_soc \
+		rtl/verilator.vlt $(SOC_SRCS)
+	verilator --lint-only --timing -Wall -Wno-fatal -Wno-TIMESCALEMOD \
+		-Wno-SYNCASYNCNET \
+		--top-module arty_a7_35t_top \
+		rtl/verilator.vlt $(SOC_SRCS) rtl/soc/reset_controller.sv rtl/boards/*.sv
+
+soc-board-test:
+	python3 -m unittest -v synthesis.soc.test_board_tools
+
+soc-check: soc-unit soc-firmware soc-sim soc-lint soc-board-test
+
+soc-bitstream: soc-firmware
+	VIVADO="$(VIVADO)" python3 -m synthesis.soc.run_board build \
+		--imem "$(SOC_IMEM)" --dmem "$(SOC_DMEM)" \
+		--output "$(SOC_BOARD_DIR)" $(if $(strip $(SOC_RTL_COMMIT)),--rtl-commit "$(SOC_RTL_COMMIT)",)
+
+soc-program:
+	VIVADO="$(VIVADO)" python3 -m synthesis.soc.run_board program \
+		--bitstream "$(SOC_BITSTREAM)"
+
 # Run every test and print a summary.
 test: sim assemble memtiming
 	@echo "========== RV32I test suite =========="
@@ -198,7 +241,7 @@ evidence-check:
 	python3 -m unittest -v tools.test_evidence_check
 	python3 tools/evidence_check.py
 
-check: unit harness-test lint evidence-check
+check: unit harness-test soc-unit soc-sim lint evidence-check
 
 env-check:
 	python3 tools/tool_environment.py manifest

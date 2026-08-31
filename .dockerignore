@@ -6,11 +6,14 @@ docs/superpowers/
 .portfolio-runs/
 graphify-out/
 build/soc/
+build/
 obj_dir*/
 coverage/
 synthesis/reports/
 synthesis/.synth-reports-*/
 synthesis/out_*/
+synthesis/soc/out_*/
+.soc-board-*/
 __pycache__/
 tests/*.hex
 tests/*.vcd

@@ -60,12 +60,28 @@ class ProfileTest(unittest.TestCase):
             ("results-check", "portfolio-render-check", "portfolio-check"),
         )
 
+    def test_soc_profile_runs_the_integrated_gate(self):
+        commands = commands_for("soc", ROOT)
+        self.assertEqual(commands, (Command("soc", ("make", "soc-check"), 1800),))
+
     def test_unknown_profile_is_rejected(self):
         with self.assertRaisesRegex(VerificationError, "unknown verification profile"):
             commands_for("quickish", ROOT)
 
 
 class RunnerTest(unittest.TestCase):
+    def test_soc_profile_propagates_timeout_and_repository_root(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        self.assertEqual(run_commands(commands_for("soc", ROOT), ROOT, {}, runner), 0)
+        self.assertEqual(calls[0][0], ["make", "soc-check"])
+        self.assertEqual(calls[0][1]["cwd"], ROOT)
+        self.assertEqual(calls[0][1]["timeout"], 1800)
+
     def test_commands_use_argument_vectors_without_shell(self):
         calls = []
 
@@ -150,6 +166,11 @@ class ContainerCommandTest(unittest.TestCase):
             command=("make", "portfolio-demo-record"),
         )
         self.assertEqual(command[-2:], ("make", "portfolio-demo-record"))
+
+    def test_soc_profile_uses_the_verification_container(self):
+        command = docker_run_command(ROOT, "soc", "verify", uid=123, gid=456)
+        self.assertIn("ghcr.io/huyhuy-bit/rv32i-verify:1-verify", command)
+        self.assertEqual(command[-4:], ("--profile", "soc", "--inside-container", "1"))
 
 
 if __name__ == "__main__":

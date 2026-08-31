@@ -84,6 +84,7 @@ def profile_commands() -> dict[str, tuple[Command, ...]]:
         Command("random-spike", ("make", "soak-lockstep", "SEEDS=200"), 3600),
     )
     coverage = (Command("coverage", ("make", "coverage"), 3600),)
+    soc = (Command("soc", ("make", "soc-check"), 1800),)
     final_checks = (
         Command("results-check", ("make", "results-check"), 600),
         Command("portfolio-render-check", ("make", "portfolio-render-check"), 600),
@@ -98,6 +99,7 @@ def profile_commands() -> dict[str, tuple[Command, ...]]:
         "lockstep": lockstep,
         "random-spike": random_spike,
         "coverage": coverage,
+        "soc": soc,
         "portfolio": final_checks,
     }
     profiles["full"] = (

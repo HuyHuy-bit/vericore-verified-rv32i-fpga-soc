@@ -1697,9 +1697,10 @@ only `part`, `clock_period_ns`, `wns_ns`, and `top`, then print
 
 `synthesis/soc/program.tcl` accepts one absolute bitstream path, opens hardware
 manager, connects and opens the target, selects exactly one device whose `PART`
-equals `xc7a35ticsg324-1L`, assigns `PROGRAM.FILE`, programs it, verifies
-`REGISTER.CONFIG_STATUS.CFG_DONE=1`, prints `===SOC_PROGRAM_DONE===`, and closes
-hardware manager. Zero, multiple, or wrong-part devices are fatal.
+equals the JTAG-visible die `xc7a35t`, assigns `PROGRAM.FILE`, programs it,
+verifies `REGISTER.IR.BIT5_DONE=1`, prints `===SOC_PROGRAM_DONE===`, and closes
+hardware manager. The build separately requires the full
+`xc7a35ticsg324-1L` part. Zero, multiple, or wrong-die devices are fatal.
 
 - [ ] **Step 7: Add failing fake-Vivado wrapper tests**
 

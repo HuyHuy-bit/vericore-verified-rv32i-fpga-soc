@@ -91,7 +91,7 @@ cpu                                             arty_a7_35t_top
 | `firmware/link.ld` | Instruction/data regions and section placement. |
 | `tools/soc_image.py` | Produce bounded instruction/data memory images from the ELF. |
 | `synthesis/soc/build.tcl` | Board synthesis, implementation, timing/utilization reports, and bitstream generation. |
-| `synthesis/soc/program.tcl` | Verify the connected FPGA part and program the bitstream. |
+| `synthesis/soc/program.tcl` | Verify the JTAG-visible FPGA die and program the bitstream. |
 | `synthesis/soc/run_board.py` | Native/WSL Vivado launcher and isolated staging wrapper. |
 | `docs/soc.md` | Memory map, build, simulation, programming, and demo guide. |
 
@@ -245,7 +245,7 @@ The interrupt selector considers only pending sources whose corresponding `mie` 
 The existing interrupt semantics remain unchanged:
 
 - The instruction at the commit point completes normally.
-- `mepc` receives its `pc+4`.
+- `mepc` receives the retired instruction's architectural successor.
 - `mcause` receives the interrupt bit and cause 11.
 - Trap entry moves `mstatus.MIE` to `MPIE` and clears `MIE`.
 - `MRET` restores interrupt-enable state and resumes at `mepc`.
@@ -358,7 +358,7 @@ The Makefile gains these entry points:
 | `make soc-lint` | Lint the external core, SoC, and board top. |
 | `make soc-check` | Run units, firmware build, integration simulation, and SoC lint. |
 | `make soc-bitstream` | Stage sources/images, route the Arty A7-35T design, write reports and `.bit`. |
-| `make soc-program` | Check the connected FPGA part and program the selected `.bit` through Vivado hardware manager. |
+| `make soc-program` | Check the connected FPGA die and program the selected `.bit` through Vivado hardware manager. |
 
 `make check` includes the fast `soc-unit` and `soc-sim` gates. `make verify` continues to cover the existing complete profile and therefore includes the fast SoC gate through `make check`.
 

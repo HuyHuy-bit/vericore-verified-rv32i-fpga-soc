@@ -3,6 +3,7 @@ obj_dir*/
 coverage/
 work/
 build/soc/
+build/
 transcript
 xsim.dir/
 csrc/
@@ -26,6 +27,8 @@ compliance/*.sig.output
 synthesis/reports/
 synthesis/.synth-reports-*/
 synthesis/out_*/
+synthesis/soc/out_*/
+.soc-board-*/
 .Xil/
 *.xpr
 *.dcp

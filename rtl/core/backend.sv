@@ -354,6 +354,8 @@ ex_mem_t ex_mem_d, ex_mem_q;
         ex_mem_d.alu_result   = alu_result_ex;
         ex_mem_d.rs2_data     = rs2_data_ex_fwd;
         ex_mem_d.pc_plus4     = id_ex_q.pc_plus4;
+        ex_mem_d.next_pc      = is_cf_instr && actual_taken
+                                ? actual_target : id_ex_q.pc_plus4;
         ex_mem_d.rd_addr      = id_ex_q.rd_addr;
         ex_mem_d.funct3       = id_ex_q.funct3;
         ex_mem_d.reg_write_en = id_ex_q.ctrl.reg_write_en;
@@ -530,10 +532,10 @@ ex_mem_t ex_mem_d, ex_mem_q;
     // so it re-executes after the handler returns.
     //
     // This is why reg_write_en_mem_gated below is gated on trap_take and NOT
-    // on irq_take: suppressing the register write while resuming at pc+4
+    // on irq_take: suppressing the register write while resuming at the successor
     // would silently drop the instruction's result.
     logic [XLEN-1:0] trap_pc_w, trap_cause_final;
-    assign trap_pc_w       = irq_take ? ex_mem_q.pc_plus4 : ex_mem_q.pc;
+    assign trap_pc_w       = irq_take ? ex_mem_q.next_pc : ex_mem_q.pc;
     assign trap_cause_final = irq_take ? irq_cause : trap_cause_w;
 
     logic [XLEN-1:0] mtvec_val, mepc_val, csr_rdata_commit;
@@ -706,7 +708,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
     // An interrupt resumes at the *next* instruction, a trap re-runs the
     // faulting one. Getting these backwards silently drops or repeats work.
     a_irq_mepc_is_next: assert property (@(posedge clk) disable iff (rst)
-        irq_take |-> (trap_pc_w == ex_mem_q.pc_plus4));
+        irq_take |-> (trap_pc_w == ex_mem_q.next_pc));
     a_trap_mepc_is_faulting: assert property (@(posedge clk) disable iff (rst)
         trap_take |-> (trap_pc_w == ex_mem_q.pc));
     // An interrupt lets the instruction in MEM complete; only a synchronous

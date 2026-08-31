@@ -1131,7 +1131,9 @@ def check_build_surface(root: Path) -> None:
     ):
         raise ContractError("evidence-check target must run its tests and checker")
     check_dependencies, check_recipes = make_target(root, "check")
-    if check_dependencies != ("unit", "harness-test", "lint", "evidence-check") or check_recipes:
+    if check_dependencies != (
+        "unit", "harness-test", "soc-unit", "soc-sim", "lint", "evidence-check"
+    ) or check_recipes:
         raise ContractError("check target must depend on exact fast gates")
 
 

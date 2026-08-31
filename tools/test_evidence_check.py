@@ -346,7 +346,7 @@ class EvidenceContractTest(unittest.TestCase):
             "evidence-check:\n"
             "\tpython3 -m unittest -v tools.test_evidence_check\n"
             "\tpython3 tools/evidence_check.py\n\n"
-            "check: unit harness-test lint evidence-check\n",
+            "check: unit harness-test soc-unit soc-sim lint evidence-check\n",
         )
         for name in ("t01_alpha", "t02_beta"):
             self.write(f"tests/{name}.s", "addi x1, x0, 1\n")
@@ -1152,8 +1152,8 @@ class EvidenceContractTest(unittest.TestCase):
         path = self.repo / "Makefile"
         path.write_text(
             path.read_text(encoding="utf-8").replace(
-                "check: unit harness-test lint evidence-check",
-                "check: unit lint evidence-check",
+                "check: unit harness-test soc-unit soc-sim lint evidence-check",
+                "check: unit soc-unit soc-sim lint evidence-check",
             ),
             encoding="utf-8",
         )
