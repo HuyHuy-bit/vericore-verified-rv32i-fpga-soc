@@ -152,6 +152,20 @@ class BoardContractTest(unittest.TestCase):
         rejection = source.index('error "setup timing failed with WNS $wns"')
         self.assertLess(report, rejection)
 
+    def test_board_clock_is_locked_at_fifty_megahertz(self) -> None:
+        clock = (ROOT / "rtl/boards/arty_clock.sv").read_text(encoding="utf-8")
+        top = (ROOT / "rtl/boards/arty_a7_35t_top.sv").read_text(encoding="utf-8")
+        build = (ROOT / "synthesis/soc/build.tcl").read_text(encoding="utf-8")
+        self.assertIn("MMCME2_BASE", clock)
+        self.assertIn(".CLKIN1_PERIOD(10.000)", clock)
+        self.assertIn(".CLKFBOUT_MULT_F(10.000)", clock)
+        self.assertIn(".CLKOUT0_DIVIDE_F(20.000)", clock)
+        self.assertIn(".CLOCK_HZ(50_000_000)", top)
+        self.assertIn(".DEBOUNCE_CYCLES(500_000)", top)
+        self.assertIn(".async_reset(reset_button || !clock_locked)", top)
+        self.assertIn("input_clock_period_ns=$input_period", build)
+        self.assertIn("soc_clock_period_ns=$soc_period", build)
+
 
 class BoardRunnerTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -246,14 +260,16 @@ class BoardRunnerTest(unittest.TestCase):
             "[ -f rtl/rv32i_pkg.sv ] && [ -f boards/arty_a7_35t.xdc ] || exit 91\n"
             "mkdir -p \"$out\"\n"
             "part=xc7a35ticsg324-1L\n"
-            "period=10.000\n"
+            "input_period=10.000\n"
+            "soc_period=20.000\n"
             "wns=0.250\n"
             "top=arty_a7_35t_top\n"
             "[ \"$mode\" != wrong_part ] || part=xc7a100tcsg324-1\n"
-            "[ \"$mode\" != wrong_period ] || period=9.000\n"
+            "[ \"$mode\" != wrong_input_period ] || input_period=9.000\n"
+            "[ \"$mode\" != wrong_soc_period ] || soc_period=19.000\n"
             "[ \"$mode\" != negative_wns ] || wns=-0.100\n"
             "[ \"$mode\" != wrong_top ] || top=wrong_top\n"
-            "printf 'part=%s\\nclock_period_ns=%s\\nwns_ns=%s\\ntop=%s\\n' \"$part\" \"$period\" \"$wns\" \"$top\" > \"$out/build_meta.txt\"\n"
+            "printf 'part=%s\\ninput_clock_period_ns=%s\\nsoc_clock_period_ns=%s\\nwns_ns=%s\\ntop=%s\\n' \"$part\" \"$input_period\" \"$soc_period\" \"$wns\" \"$top\" > \"$out/build_meta.txt\"\n"
             "[ \"$mode\" != missing_meta ] || rm -f \"$out/build_meta.txt\"\n"
             "[ \"$mode\" = missing_util ] || printf '| Slice LUTs | 1 |\\n' > \"$out/utilization.rpt\"\n"
             "[ \"$mode\" = missing_timing ] || printf 'WNS(ns) 0.250\\n' > \"$out/timing_summary.rpt\"\n"
@@ -331,7 +347,8 @@ class BoardRunnerTest(unittest.TestCase):
         )
         manifest = json.loads((self.output / "manifest.json").read_text())
         self.assertEqual(manifest["part"], "xc7a35ticsg324-1L")
-        self.assertEqual(manifest["clock_period_ns"], 10.0)
+        self.assertEqual(manifest["input_clock_period_ns"], 10.0)
+        self.assertEqual(manifest["soc_clock_period_ns"], 20.0)
         self.assertEqual(manifest["wns_ns"], 0.25)
         self.assertEqual(manifest["source_commit"], self.commit)
         self.assertEqual(manifest["rtl_commit"], self.commit)
@@ -387,7 +404,8 @@ class BoardRunnerTest(unittest.TestCase):
             "missing_meta": "build metadata is missing",
             "stale": "bitstream is stale",
             "wrong_part": "wrong applied part",
-            "wrong_period": "wrong applied clock period",
+            "wrong_input_period": "wrong applied input clock period",
+            "wrong_soc_period": "wrong applied SoC clock period",
             "negative_wns": "negative WNS",
             "wrong_top": "wrong applied top",
             "unconstrained": "unconstrained timing",

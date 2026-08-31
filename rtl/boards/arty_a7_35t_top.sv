@@ -15,22 +15,31 @@ module arty_a7_35t_top #(
     logic [31:0] progress_debug;
     logic reset_button;
     logic irq_button;
+    logic soc_clk;
+    logic clock_locked;
 
     assign reset_button = btn[0];
     assign irq_button = btn[1];
 
+    arty_clock clock (
+        .clk100(clk100),
+        .reset(reset_button),
+        .soc_clk(soc_clk),
+        .locked(clock_locked)
+    );
+
     reset_controller #(
         .POWER_ON_CYCLES(16)
     ) reset (
-        .clk(clk100),
-        .async_reset(reset_button),
+        .clk(soc_clk),
+        .async_reset(reset_button || !clock_locked),
         .rst(rst)
     );
 
     rv32i_soc #(
-        .CLOCK_HZ(100_000_000),
+        .CLOCK_HZ(50_000_000),
         .UART_BAUD(115_200),
-        .DEBOUNCE_CYCLES(1_000_000),
+        .DEBOUNCE_CYCLES(500_000),
         .ICACHE_BYTES(1024),
         .ICACHE_BLOCK_WORDS(4),
         .ICACHE_WAYS(4),
@@ -43,7 +52,7 @@ module arty_a7_35t_top #(
         .IMEM_INIT_FILE(IMEM_INIT_FILE),
         .DMEM_INIT_FILE(DMEM_INIT_FILE)
     ) soc (
-        .clk(clk100),
+        .clk(soc_clk),
         .rst(rst),
         .button_irq(irq_button),
         .led(led),

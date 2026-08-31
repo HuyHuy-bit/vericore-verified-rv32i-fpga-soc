@@ -28,7 +28,8 @@ from synthesis.run_synth import (
 
 
 PART = "xc7a35ticsg324-1L"
-PERIOD_NS = 10.0
+INPUT_PERIOD_NS = 10.0
+SOC_PERIOD_NS = 20.0
 IMAGE_WORDS = 8192
 BUILD_MARKER = "===SOC_BUILD_DONE==="
 PROGRAM_MARKER = "===SOC_PROGRAM_DONE==="
@@ -104,7 +105,7 @@ def create_board_stage(
     return stage
 
 
-def read_build_metadata(path: Path) -> tuple[str, float, float, str]:
+def read_build_metadata(path: Path) -> tuple[str, float, float, float, str]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError as exc:
@@ -117,14 +118,17 @@ def read_build_metadata(path: Path) -> tuple[str, float, float, str]:
         if key in values:
             raise BoardError(f"build metadata duplicates {key}")
         values[key] = value
-    if set(values) != {"part", "clock_period_ns", "wns_ns", "top"}:
+    if set(values) != {
+        "part", "input_clock_period_ns", "soc_clock_period_ns", "wns_ns", "top"
+    }:
         raise BoardError("build metadata is malformed")
     try:
-        period = float(values["clock_period_ns"])
+        input_period = float(values["input_clock_period_ns"])
+        soc_period = float(values["soc_clock_period_ns"])
         wns = float(values["wns_ns"])
     except ValueError as exc:
         raise BoardError("build timing metadata is malformed") from exc
-    return values["part"], period, wns, values["top"]
+    return values["part"], input_period, soc_period, wns, values["top"]
 
 
 def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts, float]:
@@ -147,11 +151,13 @@ def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts,
             raise BoardError(f"{label} is missing")
         if path.stat().st_mtime < started - 1.0:
             raise BoardError(f"{label} is stale")
-    part, period, wns, top = read_build_metadata(artifacts.metadata)
+    part, input_period, soc_period, wns, top = read_build_metadata(artifacts.metadata)
     if part != PART:
         raise BoardError(f"wrong applied part: {part}")
-    if abs(period - PERIOD_NS) > 0.0001:
-        raise BoardError(f"wrong applied clock period: {period}")
+    if abs(input_period - INPUT_PERIOD_NS) > 0.0001:
+        raise BoardError(f"wrong applied input clock period: {input_period}")
+    if abs(soc_period - SOC_PERIOD_NS) > 0.0001:
+        raise BoardError(f"wrong applied SoC clock period: {soc_period}")
     if wns < 0.0:
         raise BoardError(f"negative WNS: {wns}")
     if top != "arty_a7_35t_top":
@@ -282,7 +288,8 @@ def run_build(
                 "rtl_commit": verified_rtl,
                 "part": PART,
                 "top": "arty_a7_35t_top",
-                "clock_period_ns": PERIOD_NS,
+                "input_clock_period_ns": INPUT_PERIOD_NS,
+                "soc_clock_period_ns": SOC_PERIOD_NS,
                 "wns_ns": wns,
                 "firmware": {"imem_sha256": imem_hash, "dmem_sha256": dmem_hash},
                 "xdc_sha256": sha256(root / "boards/arty_a7_35t.xdc"),

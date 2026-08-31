@@ -579,10 +579,11 @@ class SocResultTest(unittest.TestCase):
                 "platform": "wsl-windows",
             },
             "route": {
-                "clock_period_ns": "10.000",
+                "input_clock_period_ns": "10.000",
+                "soc_clock_period_ns": "20.000",
                 "wns_ns": "0.250",
-                "critical_path_ns": "9.750",
-                "fmax_mhz": "102.564",
+                "critical_path_ns": "19.750",
+                "fmax_mhz": "50.633",
                 "lut": 10000,
                 "ff": 14000,
                 "bram_tiles": "20.0",
@@ -641,7 +642,8 @@ class SocResultTest(unittest.TestCase):
         cases = (
             (("part",), "xc7a100tcsg324-1", "part"),
             (("digilent_xdc_sha",), "C" * 40, "Digilent"),
-            (("route", "clock_period_ns"), "9.000", "10.000"),
+            (("route", "input_clock_period_ns"), "9.000", "10.000"),
+            (("route", "soc_clock_period_ns"), "19.000", "20.000"),
             (("route", "wns_ns"), "-0.100", "nonnegative"),
             (("uart", "lines"), ["rv32i soc ready"], "UART"),
             (("manual_observations", "button_presses"), 1, "button"),
@@ -742,7 +744,8 @@ class SocResultTest(unittest.TestCase):
                     "rtl_commit": self.rtl_commit,
                     "part": "xc7a35ticsg324-1L",
                     "top": "arty_a7_35t_top",
-                    "clock_period_ns": 10.0,
+                    "input_clock_period_ns": 10.0,
+                    "soc_clock_period_ns": 20.0,
                     "wns_ns": 0.25,
                     "firmware": {
                         "imem_sha256": digest(imem), "dmem_sha256": digest(dmem)
@@ -839,7 +842,7 @@ class SocResultTest(unittest.TestCase):
             "rv32i soc ready", "external irq", "external irq"
         ])
         self.assertEqual(value["route"]["lut"], 10000)
-        self.assertEqual(value["route"]["fmax_mhz"], "102.564")
+        self.assertEqual(value["route"]["fmax_mhz"], "50.633")
         self.assertEqual(
             value["uart"]["transcript_sha256"],
             hashlib.sha256(

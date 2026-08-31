@@ -2,7 +2,7 @@
 
 ## Board and observable demo
 
-The board target is the Digilent Arty A7-35T (`xc7a35ticsg324-1L`) at 100 MHz. The freestanding firmware initializes the GPIO interrupt, sets LED0, and transmits `rv32i soc ready` through the board USB-UART connection. BTN0 resets the system. A debounced BTN1 press raises a machine-external interrupt; the handler clears the pending bit, rotates the LED pattern, transmits `external irq`, and returns with `MRET`.
+The board target is the Digilent Arty A7-35T (`xc7a35ticsg324-1L`). Its 100 MHz oscillator feeds an Artix-7 MMCM that generates the 50 MHz SoC clock. The freestanding firmware initializes the GPIO interrupt, sets LED0, and transmits `rv32i soc ready` through the board USB-UART connection. BTN0 resets the system. A debounced BTN1 press raises a machine-external interrupt; the handler clears the pending bit, rotates the LED pattern, transmits `external irq`, and returns with `MRET`.
 
 Physical-board evidence: not published. The RTL, firmware, simulation, constraints, and guarded Vivado flow are present, but this document does not claim that a bitstream has run on hardware.
 
@@ -10,6 +10,7 @@ Physical-board evidence: not published. The RTL, firmware, simulation, constrain
 
 ```text
 arty_a7_35t_top
+├── arty_clock
 ├── reset_controller
 └── rv32i_soc
     ├── rv32i_core
@@ -21,7 +22,7 @@ arty_a7_35t_top
     └── GPIO, debounce, and external-interrupt logic
 ```
 
-`rv32i_core` contains the pipeline, caches, predictor, CSRs, and counters. The legacy `cpu` top wraps the same core with the original memory models, preserving directed, compliance, and lockstep verification. `rv32i_soc` attaches the external-memory form to the bus and peripherals. `arty_a7_35t_top` contains only the board reset, clock, buttons, LEDs, UART pin, and fixed board parameters.
+`rv32i_core` contains the pipeline, caches, predictor, CSRs, and counters. The legacy `cpu` top wraps the same core with the original memory models, preserving directed, compliance, and lockstep verification. `rv32i_soc` attaches the external-memory form to the bus and peripherals. `arty_a7_35t_top` contains the MMCM clock wrapper, board reset, buttons, LEDs, UART pin, and fixed board parameters.
 
 ## Core memory-client contract
 
@@ -67,7 +68,7 @@ Only data BRAM is D-cacheable. Instruction-BRAM data reads, UART, GPIO, and unma
 
 ## External-interrupt flow and priority
 
-BTN1 passes through two synchronization flops and must remain stable for 10 ms at the board clock. A debounced rising edge sets a sticky pending bit; holding or releasing the button does not retrigger. Firmware enables the peripheral, `mie.MEIE`, and `mstatus.MIE`.
+BTN1 passes through two synchronization flops and must remain stable for 10 ms at the 50 MHz SoC clock. A debounced rising edge sets a sticky pending bit; holding or releasing the button does not retrigger. Firmware enables the peripheral, `mie.MEIE`, and `mstatus.MIE`.
 
 The core reflects the peripheral level in `mip.MEIP`. Machine external interrupt cause 11 has priority over machine software and timer interrupts. Precise trap entry commits the selected instruction, writes its architectural successor to `mepc`, writes `0x8000_000B` to `mcause`, and updates the MIE/MPIE state. The handler clears `IRQ_PENDING`; `MRET` resumes the interrupted loop.
 
@@ -104,7 +105,7 @@ make soc-bitstream
 make soc-program
 ```
 
-The build requires the exact Arty part, top, 10.000 ns clock constraint, nonnegative WNS, clean DRC, completion marker, and fresh outputs. It publishes only the bitstream, compact reports, and manifest under the ignored build directory. Programming requires a `.bit` file, checks the JTAG-visible FPGA die, waits for the DONE bit, and rejects a missing completion marker.
+The build requires the exact Arty part and top, a 10.000 ns input constraint, one 20.000 ns generated SoC clock, nonnegative WNS, clean DRC, a completion marker, and fresh outputs. It records both clock periods separately and publishes only the bitstream, compact reports, and manifest under the ignored build directory. Programming requires a `.bit` file, checks the JTAG-visible FPGA die, waits for the DONE bit, and rejects a missing completion marker.
 
 ## Manual reset/button/UART checklist
 

@@ -25,14 +25,25 @@ report_timing_summary -delay_type min_max -report_unconstrained \
     -file "$output_dir/timing_summary.rpt"
 report_drc -file "$output_dir/drc.rpt"
 
-set clocks [get_clocks clk100]
-if {[llength $clocks] != 1} {
+set input_clocks [get_clocks clk100]
+if {[llength $input_clocks] != 1} {
     error "expected exactly one clk100 clock"
 }
-set period [get_property PERIOD $clocks]
-if {abs($period - 10.0) > 0.0001} {
+set input_period [get_property PERIOD $input_clocks]
+if {abs($input_period - 10.0) > 0.0001} {
     error "clk100 period is not 10 ns"
 }
+set soc_clocks {}
+foreach candidate [get_clocks -quiet] {
+    set candidate_period [get_property PERIOD $candidate]
+    if {abs($candidate_period - 20.0) <= 0.0001} {
+        lappend soc_clocks $candidate
+    }
+}
+if {[llength $soc_clocks] != 1} {
+    error "expected exactly one 20 ns SoC clock"
+}
+set soc_period [get_property PERIOD $soc_clocks]
 set setup_path [get_timing_paths -setup -max_paths 1]
 if {[llength $setup_path] != 1} {
     error "no setup timing path was reported"
@@ -58,7 +69,8 @@ if {[llength $severe_drc] != 0} {
 write_bitstream -force "$output_dir/rv32i-soc-arty-a7-35t.bit"
 set meta [open "$output_dir/build_meta.txt" w]
 puts $meta "part=[get_property PART [current_project]]"
-puts $meta "clock_period_ns=$period"
+puts $meta "input_clock_period_ns=$input_period"
+puts $meta "soc_clock_period_ns=$soc_period"
 puts $meta "wns_ns=$wns"
 puts $meta "top=arty_a7_35t_top"
 close $meta

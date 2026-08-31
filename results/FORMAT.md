@@ -31,9 +31,10 @@ and part, the pinned Digilent XDC SHA, firmware and bitstream hashes, Vivado
 identity, route measurements/report hashes, verification receipt statuses and
 hashes, the complete UART line array, and manual reset/button/LED observations.
 Unknown, missing, or duplicate fields are rejected at every nesting level. The
-record is valid only for Vivado 2025.2, the 10 ns Arty constraint, nonnegative
-WNS, complete full/SoC receipts, exactly two interrupt events and LED changes,
-and unchanged RTL between the recorded RTL and tooling commits.
+record is valid only for Vivado 2025.2, the 10 ns Arty input constraint, the
+20 ns generated SoC clock, nonnegative WNS, complete full/SoC receipts, exactly
+two interrupt events and LED changes, and unchanged RTL between the recorded
+RTL and tooling commits.
 
 The tooling commit identifies the clean checkout used for collection. The RTL
 commit identifies the last commit affecting RTL or the testbench, avoiding a

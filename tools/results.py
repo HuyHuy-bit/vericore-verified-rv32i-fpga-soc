@@ -154,8 +154,9 @@ SOC_FIELDS = {
 SOC_FIRMWARE_FIELDS = {"elf", "imem", "dmem"}
 SOC_VIVADO_FIELDS = {"version", "build", "platform"}
 SOC_ROUTE_FIELDS = {
-    "clock_period_ns", "wns_ns", "critical_path_ns", "fmax_mhz", "lut", "ff",
-    "bram_tiles", "timing_sha256", "utilization_sha256", "drc_sha256",
+    "input_clock_period_ns", "soc_clock_period_ns", "wns_ns",
+    "critical_path_ns", "fmax_mhz", "lut", "ff", "bram_tiles",
+    "timing_sha256", "utilization_sha256", "drc_sha256",
 }
 SOC_VERIFICATION_FIELDS = {
     "full_status", "soc_status", "full_receipt_sha256", "soc_receipt_sha256",
@@ -728,21 +729,30 @@ def validate_soc_fields(
             errors.append("SoC Vivado platform is unsupported")
 
     if exact_fields(value["route"], SOC_ROUTE_FIELDS, "SoC route", errors):
-        period = require_decimal(
-            value["route"]["clock_period_ns"], "SoC route clock period", errors
+        input_period = require_decimal(
+            value["route"]["input_clock_period_ns"],
+            "SoC route input clock period", errors
+        )
+        soc_period = require_decimal(
+            value["route"]["soc_clock_period_ns"],
+            "SoC route SoC clock period", errors
         )
         wns = require_decimal(value["route"]["wns_ns"], "SoC route WNS", errors)
         critical = require_decimal(
             value["route"]["critical_path_ns"], "SoC route critical path", errors
         )
         fmax = require_decimal(value["route"]["fmax_mhz"], "SoC route fmax", errors)
-        if period is not None and abs(period - 10.0) > 0.0001:
-            errors.append("SoC route clock period must be 10.000 ns")
+        if input_period is not None and abs(input_period - 10.0) > 0.0001:
+            errors.append("SoC route input clock period must be 10.000 ns")
+        if soc_period is not None and abs(soc_period - 20.0) > 0.0001:
+            errors.append("SoC route SoC clock period must be 20.000 ns")
         if wns is not None and wns < 0.0:
             errors.append("SoC route WNS must be nonnegative")
         if critical is not None and critical <= 0.0:
             errors.append("SoC route critical path must be positive")
-        if None not in (period, wns, critical) and abs(critical - (period - wns)) > 0.001:
+        if None not in (soc_period, wns, critical) and abs(
+            critical - (soc_period - wns)
+        ) > 0.001:
             errors.append("SoC route critical path does not match period minus WNS")
         if critical is not None and critical > 0.0 and fmax is not None:
             if abs(fmax - 1000.0 / critical) > 0.001:
@@ -1212,8 +1222,8 @@ def collect_soc(
 
     board_fields = {
         "schema", "status", "measured_at", "source_commit", "rtl_commit", "part",
-        "top", "clock_period_ns", "wns_ns", "firmware", "xdc_sha256", "vivado",
-        "invocation", "outputs",
+        "top", "input_clock_period_ns", "soc_clock_period_ns", "wns_ns",
+        "firmware", "xdc_sha256", "vivado", "invocation", "outputs",
     }
     errors: list[str] = []
     if not exact_fields(board, board_fields, "board manifest", errors):
@@ -1225,14 +1235,22 @@ def collect_soc(
     rtl_commit = require_sha(board["rtl_commit"], "board RTL commit", errors)
     if board["part"] != "xc7a35ticsg324-1L" or board["top"] != "arty_a7_35t_top":
         errors.append("board manifest target is incorrect")
-    board_period = board["clock_period_ns"]
+    board_input_period = board["input_clock_period_ns"]
     if (
-        not isinstance(board_period, (int, float))
-        or isinstance(board_period, bool)
-        or not math.isfinite(float(board_period))
-        or abs(float(board_period) - 10.0) > 0.0001
+        not isinstance(board_input_period, (int, float))
+        or isinstance(board_input_period, bool)
+        or not math.isfinite(float(board_input_period))
+        or abs(float(board_input_period) - 10.0) > 0.0001
     ):
-        errors.append("board manifest clock period must be 10 ns")
+        errors.append("board manifest input clock period must be 10 ns")
+    board_soc_period = board["soc_clock_period_ns"]
+    if (
+        not isinstance(board_soc_period, (int, float))
+        or isinstance(board_soc_period, bool)
+        or not math.isfinite(float(board_soc_period))
+        or abs(float(board_soc_period) - 20.0) > 0.0001
+    ):
+        errors.append("board manifest SoC clock period must be 20 ns")
     board_wns = board["wns_ns"]
     if (
         not isinstance(board_wns, (int, float))
@@ -1337,7 +1355,8 @@ def collect_soc(
         raise ResultError(f"board report parsing failed: {exc}") from exc
     if abs(report_wns - float(board["wns_ns"])) > 0.0001:
         raise ResultError("board timing report and manifest WNS differ")
-    period = float(board["clock_period_ns"])
+    input_period = float(board["input_clock_period_ns"])
+    period = float(board["soc_clock_period_ns"])
     critical = period - report_wns
     if critical <= 0.0:
         raise ResultError("board critical path is invalid")
@@ -1385,7 +1404,8 @@ def collect_soc(
             "platform": board["vivado"]["platform"],
         },
         "route": {
-            "clock_period_ns": f"{period:.3f}",
+            "input_clock_period_ns": f"{input_period:.3f}",
+            "soc_clock_period_ns": f"{period:.3f}",
             "wns_ns": f"{report_wns:.3f}",
             "critical_path_ns": f"{critical:.3f}",
             "fmax_mhz": f"{1000.0 / critical:.3f}",

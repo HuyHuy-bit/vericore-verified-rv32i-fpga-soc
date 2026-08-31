@@ -53,9 +53,10 @@ This boundary prevents board-specific logic from entering the established CPU ha
 Existing verification                           Board system
 
 cpu                                             arty_a7_35t_top
-├── rv32i_core                                  ├── reset_controller
-├── instr_mem                                   └── rv32i_soc
-└── data_mem                                        ├── rv32i_core
+├── rv32i_core                                  ├── arty_clock
+├── instr_mem                                   ├── reset_controller
+└── data_mem                                    └── rv32i_soc
+                                                    ├── rv32i_core
                                                     ├── 2 request-to-Wishbone adapters
                                                     ├── Wishbone arbiter/interconnect
                                                     ├── instruction BRAM
@@ -81,7 +82,8 @@ cpu                                             arty_a7_35t_top
 | `rtl/soc/wb_gpio_irq.sv` | LED, button, interrupt-pending, and interrupt-enable registers. |
 | `rtl/soc/reset_controller.sv` | Configuration-time reset plus asynchronous button assertion and synchronous release. |
 | `rtl/soc/rv32i_soc.sv` | Core, bus, memories, peripherals, fault latch, and parameters. |
-| `rtl/boards/arty_a7_35t_top.sv` | Board pins and board-specific parameter values only. |
+| `rtl/boards/arty_clock.sv` | Generate and buffer the 50 MHz SoC clock from the 100 MHz board oscillator. |
+| `rtl/boards/arty_a7_35t_top.sv` | Board pins, clock/reset integration, and fixed board parameters. |
 | `boards/arty_a7_35t.xdc` | Physical pins, I/O standards, and 100 MHz clock constraint. |
 | `sim/unit/*.sv` | Bus, peripheral, debounce, and external-interrupt unit tests. |
 | `sim/soc_tb.cpp` | Firmware-level SoC simulation and UART decoder. |
@@ -208,7 +210,7 @@ Instruction fetch outside instruction BRAM, writes to instruction BRAM, instruct
 | `0x1000_0000` | `TXDATA` | A write transmits bits `[7:0]`. The slave withholds `ack` while TX is busy, then accepts the byte exactly once. Reads return zero. |
 | `0x1000_0004` | `STATUS` | Read bit 0 is `TX_READY`; all other bits are zero. Writes receive `err`. |
 
-The board parameters are `CLOCK_HZ=100000000`, `UART_BAUD=115200`, eight data bits, no parity, one stop bit, idle high, least-significant data bit first. The integer divider is rounded to the nearest clock count. Elaboration rejects a zero divider or a baud-rate error above two percent.
+The board parameters are `CLOCK_HZ=50000000`, `UART_BAUD=115200`, eight data bits, no parity, one stop bit, idle high, least-significant data bit first. The integer divider is rounded to the nearest clock count. Elaboration rejects a zero divider or a baud-rate error above two percent.
 
 The unit and integration simulations override the clock/baud parameters with a smaller integral divider; they test the same state machine without simulating hundreds of physical clock cycles per serial bit.
 
@@ -221,7 +223,7 @@ The unit and integration simulations override the clock/baud parameters with a s
 | `0x1000_1008` | `IRQ_PENDING` | Read bit 0. Writing one to bit 0 clears it; writing zero leaves it unchanged. |
 | `0x1000_100C` | `IRQ_ENABLE` | Read/write bit 0. Reset value is zero. |
 
-BTN1 passes through two synchronizer flip-flops. A counter changes the debounced state only after the synchronized input remains different for `DEBOUNCE_CYCLES`. The board value is `1000000`, representing 10 ms at 100 MHz; unit tests use a small override.
+BTN1 passes through two synchronizer flip-flops. A counter changes the debounced state only after the synchronized input remains different for `DEBOUNCE_CYCLES`. The board value is `500000`, representing 10 ms at 50 MHz; unit tests use a small override.
 
 A rising edge of the debounced state sets `IRQ_PENDING`. A set event wins over a simultaneous software clear so an event cannot be lost. The peripheral interrupt output is:
 
@@ -254,7 +256,7 @@ New assertions cover MEIP reflection, enable gating, cause priority, interrupt/t
 
 ## Reset and Board Wiring
 
-`reset_controller` holds the SoC in reset for 16 `clk100` cycles after FPGA configuration. BTN0 asynchronously asserts reset and passes through a two-flop chain for synchronous deassertion. Reset clears bus state, cache valid/dirty state, UART activity, GPIO output, IRQ state, CSRs, pipeline state, and the sticky bus-fault indicator.
+`arty_clock` uses an `MMCME2_BASE` and global buffers to generate the 50 MHz SoC clock from `clk100`. `reset_controller` holds the SoC in reset until the MMCM locks and for 16 SoC-clock cycles afterward. BTN0 resets the MMCM and asynchronously asserts the SoC reset; release is synchronized to the SoC clock. Reset clears bus state, cache valid/dirty state, UART activity, GPIO output, IRQ state, CSRs, pipeline state, and the sticky bus-fault indicator.
 
 The board constraints are derived from Digilent's `Arty-A7-35-Master.xdc` at commit `00a3404901f35aa9567b01ecb3f2c233b6efe9f4`:
 
@@ -423,7 +425,7 @@ The SoC work is complete only when all of these conditions hold:
 - The SoC integration test validates the complete boot and two-interrupt transcript without prefix acceptance or timeout ambiguity.
 - MMIO transactions bypass the D-cache in every cache mode and complete exactly once.
 - External interrupts produce `mcause=0x8000000B`, preserve the interrupted instruction's effects, clear through the peripheral W1C register, and resume through `MRET`.
-- The Arty A7-35T bitstream builds with the physical 100 MHz constraint and the exact committed firmware image.
+- The Arty A7-35T bitstream builds with the physical 100 MHz input constraint, the 50 MHz generated SoC clock, and the exact committed firmware image.
 - The programmed board produces the recorded UART and LED behavior.
 - Every published number comes from committed logs or validated reports generated for the recorded RTL commit.
 - Generated Vivado projects, checkpoints, logs, journals, raw reports, ELF files, memory images, and bitstreams remain outside Git history unless the user explicitly approves a compact release artifact.
