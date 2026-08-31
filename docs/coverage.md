@@ -4,6 +4,8 @@
 
 **44/44 cover points hit (100.0%)**, from the directed suite and deterministic BTB-alias fixture run against a cache-enabled build (`make coverage`).
 
+SoC unit and integration checks are not part of this core coverage database.
+
 | Cover point | Hits |
 |---|---|
 | `cpu.u_backend.c_branch_nottaken` | 216 |

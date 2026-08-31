@@ -16,7 +16,12 @@ import sys
 from typing import Callable, Iterable
 
 
-REFERENCE_KEYS = ("ARCH_TEST_SHA", "ARCH_TEST_EXPECTED", "SPIKE_SHA")
+REFERENCE_KEYS = (
+    "ARCH_TEST_SHA",
+    "ARCH_TEST_EXPECTED",
+    "DIGILENT_XDC_SHA",
+    "SPIKE_SHA",
+)
 FACT_KEYS = (
     "ISA",
     "DIRECTED_TESTS",
@@ -65,6 +70,7 @@ REQUIRED_PATHS = (
     "results/**",
 )
 EVIDENCE_PATHS = ("README.md", "docs/**")
+SOC_PATHS = ("firmware/**", "boards/**", "synthesis/soc/**")
 CHECKOUT_ACTION = "actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955"
 CACHE_ACTION = "actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"
 DIRECTED_MATRIX = (
@@ -435,7 +441,26 @@ def parse_reference_versions(root: Path) -> dict[str, str]:
         raise ContractError("ARCH_TEST_EXPECTED must be a canonical positive integer")
     if not SHA_RE.fullmatch(values["SPIKE_SHA"]):
         raise ContractError("SPIKE_SHA must be a lowercase 40-hex SHA")
+    if not SHA_RE.fullmatch(values["DIGILENT_XDC_SHA"]):
+        raise ContractError("DIGILENT_XDC_SHA must be a lowercase 40-hex SHA")
     return values
+
+
+def check_digilent_xdc(root: Path, versions: dict[str, str]) -> None:
+    path = root / "boards/arty_a7_35t.xdc"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ContractError(f"missing board constraints: {path}") from exc
+    pins = re.findall(
+        r"https://github\.com/Digilent/digilent-xdc/blob/"
+        r"([0-9a-f]{40})/Arty-A7-35-Master\.xdc",
+        source,
+    )
+    if len(pins) != 1:
+        raise ContractError("board constraints must name one official Digilent source SHA")
+    if pins[0] != versions["DIGILENT_XDC_SHA"]:
+        raise ContractError("Digilent XDC source SHA does not match metadata")
 
 
 def executable_sources(root: Path) -> Iterable[Path]:
@@ -487,7 +512,11 @@ def alternate_count_name(name: str) -> bool:
 
 
 def check_symbolic_consumers(root: Path, versions: dict[str, str]) -> None:
-    literal_pins = (versions["ARCH_TEST_SHA"], versions["SPIKE_SHA"])
+    literal_pins = (
+        versions["ARCH_TEST_SHA"],
+        versions["DIGILENT_XDC_SHA"],
+        versions["SPIKE_SHA"],
+    )
     for path in executable_sources(root):
         source = path.read_text(encoding="utf-8", errors="replace")
         code = normalized_literal_code(source)
@@ -593,6 +622,7 @@ def check_triggers(path: Path, lines: list[YamlLine]) -> None:
     required = set(REQUIRED_PATHS) | {f".github/workflows/{path.name}"}
     if path.name == "rtl-tests.yml":
         required.update(EVIDENCE_PATHS)
+        required.update(SOC_PATHS)
     for event in ("push", "pull_request"):
         actual = event_paths(lines, path, event)
         for value in sorted(required):
@@ -917,6 +947,7 @@ def check_container_workflows(
             "python3 tools/verification.py container --profile fast",
             "python3 tools/verification.py container --profile directed-memory",
             "python3 tools/verification.py container --profile directed-predictor",
+            "python3 tools/verification.py container --profile soc",
             "python3 tools/verification.py container --profile portfolio",
         ),
         False,
@@ -1073,6 +1104,7 @@ def check_workflows(root: Path) -> None:
 
 def check_contracts(root: Path) -> None:
     versions = parse_reference_versions(root)
+    check_digilent_xdc(root, versions)
     check_symbolic_consumers(root, versions)
     check_workflows(root)
 

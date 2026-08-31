@@ -12,10 +12,10 @@ import sys
 from typing import Callable, Mapping, Sequence
 
 if __package__:
-    from .results import ResultError, write_verification_receipt
+    from .results import ResultError, write_profile_receipt, write_verification_receipt
     from .tool_environment import TOOL_KEYS, load_manifest, validate_manifest
 else:
-    from results import ResultError, write_verification_receipt
+    from results import ResultError, write_profile_receipt, write_verification_receipt
     from tool_environment import TOOL_KEYS, load_manifest, validate_manifest
 
 
@@ -248,8 +248,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     try:
         if args.mode == "run":
-            if args.receipt is not None and args.profile != "full":
-                raise VerificationError("verification receipts require the full profile")
+            if args.receipt is not None and args.profile not in {"full", "soc"}:
+                raise VerificationError("verification receipts require the full or soc profile")
             receipt = args.receipt
             if receipt is not None and not receipt.is_absolute():
                 receipt = root / receipt
@@ -268,7 +268,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return status
             status = run_commands(commands_for(args.profile, root), root, {})
             if status == 0 and receipt is not None:
-                write_verification_receipt(root, receipt)
+                if args.profile == "full":
+                    write_verification_receipt(root, receipt)
+                else:
+                    write_profile_receipt(root, receipt, args.profile)
                 print(f"wrote verification receipt: {receipt}")
             return status
         if args.command is not None and args.mode != "container":

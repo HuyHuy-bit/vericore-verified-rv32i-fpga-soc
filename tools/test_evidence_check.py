@@ -23,6 +23,7 @@ CHECKER = ROOT / "tools/evidence_check.py"
 APPROVED_REFERENCES = {
     "ARCH_TEST_SHA": "6f7f47bdc61c0c51c0cbf75789678a1235eeefc2",
     "ARCH_TEST_EXPECTED": "38",
+    "DIGILENT_XDC_SHA": "00a3404901f35aa9567b01ecb3f2c233b6efe9f4",
     "SPIKE_SHA": "55b4658dbf574ba0b714083ec436ce2cb5be1998",
 }
 
@@ -48,6 +49,7 @@ class EvidenceContractTest(unittest.TestCase):
     """Exercise the checker against isolated, mutable repository trees."""
 
     ARCH_SHA = "a" * 40
+    DIGILENT_SHA = "c" * 40
     SPIKE_SHA = "b" * 40
     REQUIRED_PATHS = (
         "rtl/**",
@@ -61,6 +63,7 @@ class EvidenceContractTest(unittest.TestCase):
         "tests/**",
         "results/**",
     )
+    SOC_PATHS = ("firmware/**", "boards/**", "synthesis/soc/**")
     MATRIX = (
         ("baseline", ""),
         ("slow-mem", "IMEM_LAT=10 DMEM_LAT=10"),
@@ -76,6 +79,7 @@ class EvidenceContractTest(unittest.TestCase):
         for directory in (
             "tools",
             "compliance",
+            "boards",
             ".github/workflows",
         ):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
@@ -102,9 +106,15 @@ class EvidenceContractTest(unittest.TestCase):
                 "# Shared external verification identities.\n"
                 f"ARCH_TEST_SHA={self.ARCH_SHA}\n"
                 "ARCH_TEST_EXPECTED=7\n"
+                f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
                 f"SPIKE_SHA={self.SPIKE_SHA}\n"
             )
         self.write("tools/reference_versions.env", contents)
+        self.write(
+            "boards/arty_a7_35t.xdc",
+            "# https://github.com/Digilent/digilent-xdc/blob/"
+            f"{self.DIGILENT_SHA}/Arty-A7-35-Master.xdc\n",
+        )
 
     def write_consumers(self) -> None:
         self.write(
@@ -141,7 +151,7 @@ class EvidenceContractTest(unittest.TestCase):
     def trigger_block(self, workflow: str) -> str:
         paths = self.REQUIRED_PATHS + (f".github/workflows/{workflow}",)
         if workflow == "rtl-tests.yml":
-            paths += ("README.md", "docs/**")
+            paths += self.SOC_PATHS + ("README.md", "docs/**")
         rendered = "\n".join(f"      - '{path}'" for path in paths)
         return (
             "on:\n"
@@ -487,6 +497,17 @@ class EvidenceContractTest(unittest.TestCase):
         path.write_text(source, encoding="utf-8")
         self.assert_contract_failure("commands are not canonical")
 
+    def test_container_workflow_rejects_a_missing_soc_profile(self) -> None:
+        self.use_container_workflows()
+        path = self.repo / ".github/workflows/rtl-tests.yml"
+        source = path.read_text(encoding="utf-8").replace(
+            "      - name: Verify integrated SoC\n"
+            "        run: python3 tools/verification.py container --profile soc\n",
+            "",
+        )
+        path.write_text(source, encoding="utf-8")
+        self.assert_contract_failure("commands are not canonical")
+
     def test_real_repository_metadata_matches_test_only_oracle(self) -> None:
         parsed = {}
         for line in (ROOT / "tools/reference_versions.env").read_text(encoding="utf-8").splitlines():
@@ -508,6 +529,7 @@ class EvidenceContractTest(unittest.TestCase):
             f"ARCH_TEST_SHA={self.ARCH_SHA}\n"
             "ARCH_TEST_EXPECTED=7\n"
             "ARCH_TEST_EXPECTED=8\n"
+            f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
             f"SPIKE_SHA={self.SPIKE_SHA}\n"
         )
         self.assert_contract_failure("duplicate reference metadata key: ARCH_TEST_EXPECTED")
@@ -516,6 +538,7 @@ class EvidenceContractTest(unittest.TestCase):
         self.write_metadata(
             f"ARCH_TEST_SHA={self.ARCH_SHA}\n"
             "ARCH_TEST_EXPECTED=7\n"
+            f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
             f"SPIKE_SHA={self.SPIKE_SHA}\n"
             "ARCH_TEST_BRANCH=old-framework-2.x\n"
         )
@@ -525,6 +548,7 @@ class EvidenceContractTest(unittest.TestCase):
         self.write_metadata(
             f"ARCH_TEST_SHA = {self.ARCH_SHA}\n"
             "ARCH_TEST_EXPECTED=7\n"
+            f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
             f"SPIKE_SHA={self.SPIKE_SHA}\n"
         )
         self.assert_contract_failure("malformed reference metadata line 1")
@@ -533,15 +557,74 @@ class EvidenceContractTest(unittest.TestCase):
         self.write_metadata(
             "ARCH_TEST_SHA=old-framework-2.x\n"
             "ARCH_TEST_EXPECTED=0\n"
+            f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
             f"SPIKE_SHA={self.SPIKE_SHA}\n"
         )
         self.assert_contract_failure("ARCH_TEST_SHA must be a lowercase 40-hex SHA")
+
+    def test_digilent_xdc_pin_must_match_the_constraint_source(self) -> None:
+        path = self.repo / "boards/arty_a7_35t.xdc"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                self.DIGILENT_SHA, "d" * 40
+            ),
+            encoding="utf-8",
+        )
+        self.assert_contract_failure("Digilent XDC source SHA does not match metadata")
+
+    def test_digilent_metadata_is_required_unique_and_lowercase(self) -> None:
+        cases = (
+            (
+                f"ARCH_TEST_SHA={self.ARCH_SHA}\nARCH_TEST_EXPECTED=7\n"
+                f"SPIKE_SHA={self.SPIKE_SHA}\n",
+                "missing reference metadata key: DIGILENT_XDC_SHA",
+            ),
+            (
+                f"ARCH_TEST_SHA={self.ARCH_SHA}\nARCH_TEST_EXPECTED=7\n"
+                f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
+                f"DIGILENT_XDC_SHA={'d' * 40}\nSPIKE_SHA={self.SPIKE_SHA}\n",
+                "duplicate reference metadata key: DIGILENT_XDC_SHA",
+            ),
+            (
+                f"ARCH_TEST_SHA={self.ARCH_SHA}\nARCH_TEST_EXPECTED=7\n"
+                f"DIGILENT_XDC_SHA={self.DIGILENT_SHA.upper()}\n"
+                f"SPIKE_SHA={self.SPIKE_SHA}\n",
+                "DIGILENT_XDC_SHA must be a lowercase 40-hex SHA",
+            ),
+        )
+        for metadata, diagnostic in cases:
+            with self.subTest(diagnostic=diagnostic):
+                self.write_metadata(metadata)
+                self.assert_contract_failure(diagnostic)
+
+    def test_constraints_reject_multiple_official_source_pins(self) -> None:
+        path = self.repo / "boards/arty_a7_35t.xdc"
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + "# https://github.com/Digilent/digilent-xdc/blob/"
+            + "d" * 40
+            + "/Arty-A7-35-Master.xdc\n",
+            encoding="utf-8",
+        )
+        self.assert_contract_failure("one official Digilent source SHA")
+
+    def test_rtl_workflow_must_trigger_for_soc_inputs(self) -> None:
+        workflow = self.rtl_workflow().replace("      - 'firmware/**'\n", "", 1)
+        self.write_workflow("rtl-tests.yml", workflow)
+        self.assert_contract_failure("push.paths missing firmware/**")
 
     def test_literal_pin_in_executable_consumer_is_rejected(self) -> None:
         self.write(
             "tools/bad_consumer.sh",
             f"#!/usr/bin/env bash\nPIN={self.SPIKE_SHA}\necho \"$PIN\"\n",
             executable=True,
+        )
+        self.assert_contract_failure("literal reference pin duplicated in executable consumer")
+
+    def test_literal_digilent_pin_in_executable_consumer_is_rejected(self) -> None:
+        self.write(
+            "tools/bad_xdc.py",
+            f'PIN = "{self.DIGILENT_SHA}"\n',
         )
         self.assert_contract_failure("literal reference pin duplicated in executable consumer")
 
@@ -1006,6 +1089,7 @@ class EvidenceContractTest(unittest.TestCase):
         self.write_metadata(
             f"ARCH_TEST_SHA={self.ARCH_SHA}\n"
             "ARCH_TEST_EXPECTED=38\n"
+            f"DIGILENT_XDC_SHA={self.DIGILENT_SHA}\n"
             f"SPIKE_SHA={self.SPIKE_SHA}\n"
         )
         self.write(

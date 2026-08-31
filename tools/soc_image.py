@@ -290,7 +290,8 @@ def validate_manifest(path: Path) -> dict[str, Any]:
             raise _fail(path, f"{label} hash mismatch")
         if label != "elf":
             try:
-                line_count = sum(1 for _ in artifact_path.open(encoding="ascii"))
+                with artifact_path.open(encoding="ascii") as artifact_file:
+                    line_count = sum(1 for _ in artifact_file)
             except (OSError, UnicodeError) as error:
                 raise _fail(path, f"invalid {label} image: {error}") from error
             if line_count != artifact["words"]:

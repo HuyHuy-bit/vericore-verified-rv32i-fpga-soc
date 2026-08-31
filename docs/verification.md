@@ -47,6 +47,14 @@ Tests name their trap handler via a `la` pseudo-instruction rather than a hardco
 **Catches:** decode/execute bugs, the specific hazard each test targets, trap entry/exit.
 **Doesn't catch:** anything the author didn't think to write. Final-state comparison also can't distinguish "right answer via the wrong path" from "right answer" — which is what lockstep below is for.
 
+## SoC units and firmware integration (`make soc-check`)
+
+The external core boundary and machine-external interrupt are isolated by `core_external` and `csr_external_irq`. The Wishbone path is checked by `wb_master_adapter`, `wb_arbiter`, `wb_interconnect`, and `wb_memory`. Peripheral and board-control behavior is checked by `uart_tx`, `wb_uart`, `button_debounce`, `wb_gpio_irq`, and `reset_controller`; `soc_smoke` proves that the integrated hierarchy fetches and retires without a bus fault. Each unit has a bounded timeout and covers successful transactions plus delayed/error/permission/bounce cases relevant to that block.
+
+The firmware-level Verilator harness uses the exact ELF-derived instruction and data images. It requires the complete stream `rv32i soc ready\nexternal irq\nexternal irq\n`, not a matching prefix. It rejects a bouncing BTN1 waveform, then requires two distinct debounced presses, exactly two LED transitions, continued retirement/progress after each `MRET`, no duplicate interrupt, no UART framing error, no Wishbone error, and completion before its deadline.
+
+`make soc-check` also validates the ELF/image manifest, lints `rv32i_soc` and `arty_a7_35t_top`, and runs guarded board-flow contracts. GitHub Actions runs this profile for changes to RTL, simulation, firmware, board constraints, SoC synthesis tools, build definitions, and the workflow itself. Vivado routing and physical programming remain local evidence steps.
+
 ## Compliance suite (`compliance/`)
 
 The pinned `riscv-arch-test` `rv32i_m/I` suite contains 38 independently-written programs, each dumping a signature diffed word-for-word against a golden reference. It runs in a dedicated workflow for relevant pushes and pull requests; it is not multiplied across the six directed configurations.
@@ -69,7 +77,9 @@ Spike itself is pinned in CI to the exact commit these results were measured aga
 
 ## SVA assertions
 
-**25 concurrent properties** are built into every simulator via `--assert`, and **2 immediate assertions** enforce both directions of the load-use dependency/stall equivalence. They sit beside the logic they constrain: next-PC priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall boundedness at the top level, and hazard soundness/completeness in `hazard_detect.sv`.
+The frozen evidence record reports the legacy core's concurrent and immediate properties. They sit beside the logic they constrain: next-PC priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall boundedness, and hazard soundness/completeness in `hazard_detect.sv`.
+
+The current tree adds properties for `MEIP` reflection and gating, Wishbone ownership/response/stability, uncached MMIO counting, sticky bus faults, reset release, and GPIO/UART exclusivity. Source counts are derived rather than hand-maintained and will replace the historical figures only when a complete current verification record is published.
 
 The interrupt properties are the sharpest: an interrupt resumes at the retired instruction's architectural successor while a trap re-runs the faulting instruction, so `a_irq_mepc_is_next` and `a_trap_mepc_is_faulting` pin down both directions — getting them backwards silently drops or repeats work.
 
@@ -98,4 +108,4 @@ Getting it working surfaced a non-obvious hazard worth recording: the two machin
 
 - **Trap/CSR/interrupt generation under random stimulus.** Control flow is covered now (`make soak-lockstep`); privileged sequences are not, and need the generator to model privilege state rather than just emit instructions.
 - **Formal.** The RVFI port makes a formal flow (e.g. riscv-formal) bindable, but none is set up.
-- **Timing closure.** Nothing here says whether the design meets timing; see the synthesis section of `docs/architecture.md`.
+- **Physical-board validation.** The SoC passes simulation and flow contracts, but no validated route/program/manual-board result is published yet; see `docs/soc.md`.

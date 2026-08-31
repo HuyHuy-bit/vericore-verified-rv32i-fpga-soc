@@ -9,14 +9,18 @@ import sys
 import tempfile
 
 if __package__:
-    from .results import ResultSet, evidence_state, load_result_set, validate_result_set
+    from .results import (
+        ResultSet, evidence_state, load_json, load_result_set, validate_result_set,
+    )
 else:
-    from results import ResultSet, evidence_state, load_result_set, validate_result_set
+    from results import (
+        ResultSet, evidence_state, load_json, load_result_set, validate_result_set,
+    )
 
 
 DOCUMENT_BLOCKS = {
-    "README.md": ("facts", "status", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-    "docs/evidence.md": ("overview", "facts", "status", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+    "README.md": ("facts", "status", "soc", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
+    "docs/evidence.md": ("overview", "facts", "status", "soc", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
     "docs/architecture.md": ("facts", "status", "benchmarks", "synthesis"),
     "docs/verification.md": ("facts", "status", "summary"),
 }
@@ -46,6 +50,23 @@ def replace_block(source: str, name: str, contents: str) -> str:
 
 def percentage(numerator: int, denominator: int) -> str:
     return "n/a" if denominator == 0 else f"{100.0 * numerator / denominator:.1f}%"
+
+
+def soc_status(result_root: Path) -> str:
+    path = result_root / "soc.json"
+    if not path.exists():
+        return "Physical-board evidence: not published"
+    value = load_json(path)
+    route = value["route"]
+    return "\n".join((
+        "Physical-board evidence: published and validated",
+        "",
+        "| Board | Part | LUT | FF | BRAM tiles | WNS (ns) | fmax (MHz) |",
+        "|---|---|---:|---:|---:|---:|---:|",
+        f"| {value['board']} | `{value['part']}` | {route['lut']:,} | "
+        f"{route['ff']:,} | {route['bram_tiles']} | {route['wns_ns']} | "
+        f"{route['fmax_mhz']} |",
+    ))
 
 
 def benchmark_table(result: ResultSet) -> str:
@@ -243,6 +264,7 @@ def block_contents(result: ResultSet, state: str) -> dict[str, str]:
         "status": evidence_notice(result, state),
         "provenance": provenance(result),
         "summary": summary(result),
+        "soc": soc_status(result.root),
     }
 
 

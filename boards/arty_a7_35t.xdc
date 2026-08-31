@@ -1,4 +1,4 @@
-# Digilent Arty-A7-35-Master.xdc at 00a3404901f35aa9567b01ecb3f2c233b6efe9f4
+# https://github.com/Digilent/digilent-xdc/blob/00a3404901f35aa9567b01ecb3f2c233b6efe9f4/Arty-A7-35-Master.xdc
 set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports clk100]
 create_clock -period 10.000 -name clk100 [get_ports clk100]
 set_property -dict {PACKAGE_PIN D9 IOSTANDARD LVCMOS33} [get_ports {btn[0]}]

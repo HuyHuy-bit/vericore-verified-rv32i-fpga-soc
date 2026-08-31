@@ -38,6 +38,8 @@ SOC_BUILD_DIR ?= build/soc
 SOC_GCC ?= riscv64-unknown-elf-gcc
 SOC_MARCH ?= rv32i_zicsr_zifencei
 SOC_ELF = $(SOC_BUILD_DIR)/firmware.elf
+SOC_START_OBJ = $(SOC_BUILD_DIR)/start.o
+SOC_DEMO_OBJ = $(SOC_BUILD_DIR)/demo.o
 SOC_IMEM = $(SOC_BUILD_DIR)/firmware-imem.hex
 SOC_DMEM = $(SOC_BUILD_DIR)/firmware-dmem.hex
 SOC_MANIFEST = $(SOC_BUILD_DIR)/firmware-images.json
@@ -140,11 +142,18 @@ soc-image-test:
 soc-firmware:
 	mkdir -p "$(SOC_BUILD_DIR)"
 	$(SOC_GCC) -march=$(SOC_MARCH) -mabi=ilp32 \
-		-nostdlib -ffreestanding -fno-builtin -fno-pic -mno-relax -Os \
+		-ffreestanding -fno-builtin -fno-pic -mno-relax -Os \
 		-ffunction-sections -fdata-sections -msmall-data-limit=0 \
-		-fno-asynchronous-unwind-tables -fno-unwind-tables \
+		-fno-asynchronous-unwind-tables -fno-unwind-tables -c \
+		-o "$(SOC_START_OBJ)" firmware/start.S
+	$(SOC_GCC) -march=$(SOC_MARCH) -mabi=ilp32 \
+		-ffreestanding -fno-builtin -fno-pic -mno-relax -Os \
+		-ffunction-sections -fdata-sections -msmall-data-limit=0 \
+		-fno-asynchronous-unwind-tables -fno-unwind-tables -c \
+		-o "$(SOC_DEMO_OBJ)" firmware/demo.c
+	$(SOC_GCC) -march=$(SOC_MARCH) -mabi=ilp32 -nostdlib -mno-relax \
 		-Wl,-T,firmware/link.ld -Wl,--gc-sections -Wl,--build-id=none \
-		-Wl,--no-relax -o "$(SOC_ELF)" firmware/start.S firmware/demo.c
+		-Wl,--no-relax -o "$(SOC_ELF)" $(SOC_START_OBJ) $(SOC_DEMO_OBJ)
 	python3 tools/soc_image.py --elf "$(SOC_ELF)" --imem "$(SOC_IMEM)" \
 		--dmem "$(SOC_DMEM)" --manifest "$(SOC_MANIFEST)"
 

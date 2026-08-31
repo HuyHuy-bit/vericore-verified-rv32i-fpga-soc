@@ -13,9 +13,12 @@ from tools.render_portfolio import (
     check_documents,
     render_documents,
     replace_block,
+    soc_status,
     write_documents,
 )
 from tools.results import ResultSet
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PortfolioRendererTest(unittest.TestCase):
@@ -31,8 +34,8 @@ class PortfolioRendererTest(unittest.TestCase):
 
     def write_documents(self) -> None:
         blocks = {
-            "README.md": ("facts", "status", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-            "docs/evidence.md": ("overview", "facts", "status", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+            "README.md": ("facts", "status", "soc", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
+            "docs/evidence.md": ("overview", "facts", "status", "soc", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
             "docs/architecture.md": ("facts", "status", "benchmarks", "synthesis"),
             "docs/verification.md": ("facts", "status", "summary"),
         }
@@ -145,6 +148,13 @@ class PortfolioRendererTest(unittest.TestCase):
                 with self.assertRaisesRegex(RenderError, diagnostic):
                     replace_block(source, "x", "new")
 
+    def test_absent_soc_evidence_renders_only_the_pending_state(self) -> None:
+        status = soc_status(self.root / "results")
+        self.assertEqual(status, "Physical-board evidence: not published")
+        self.assertNotIn("LUT", status)
+        self.assertNotIn("MHz", status)
+        self.assertNotIn("passed", status.lower())
+
     def test_render_replaces_every_known_block(self) -> None:
         rendered = render_documents(self.root, self.result)
         self.assertEqual(set(rendered), {
@@ -158,6 +168,14 @@ class PortfolioRendererTest(unittest.TestCase):
         self.assertIn("66.7–83.3 MHz routed Artix-7 implementations", rendered[self.root / "README.md"])
         self.assertIn("RISC-V assembler 2.42", rendered[self.root / "README.md"])
         self.assertIn("38/38", rendered[self.root / "docs/evidence.md"])
+        self.assertIn(
+            "Physical-board evidence: not published",
+            rendered[self.root / "README.md"],
+        )
+        self.assertIn(
+            "Physical-board evidence: not published",
+            rendered[self.root / "docs/evidence.md"],
+        )
         self.assertIn("`" + "a" * 40 + "`", rendered[self.root / "docs/evidence.md"])
         self.assertIn("`" + "b" * 40 + "`", rendered[self.root / "docs/evidence.md"])
         self.assertIn("`" + "0" * 64 + "` / `" + "4" * 64 + "`", rendered[self.root / "docs/evidence.md"])
@@ -220,6 +238,84 @@ class PortfolioRendererTest(unittest.TestCase):
         with self.assertRaisesRegex(RenderError, "result records"):
             write_documents(self.root)
         self.assertEqual((self.root / "README.md").read_bytes(), before)
+
+
+class SocDocumentationContractTest(unittest.TestCase):
+    def read(self, relative: str) -> str:
+        return (ROOT / relative).read_text(encoding="utf-8")
+
+    def test_readme_links_the_soc_guide_and_labels_the_recording(self) -> None:
+        source = self.read("README.md")
+        self.assertIn("[Board-ready SoC](docs/soc.md)", source)
+        self.assertIn("verification workflow", source)
+        self.assertIn("not FPGA board footage", source)
+        self.assertIn("make soc-check", source)
+        self.assertIn("make soc-bitstream", source)
+
+    def test_soc_guide_records_the_complete_board_contract(self) -> None:
+        source = self.read("docs/soc.md")
+        required = (
+            "0x0000_0000–0x0000_7FFF",
+            "0x1000_0000–0x1000_000F",
+            "0x1000_1000–0x1000_101F",
+            "0x2000_0000–0x2000_7FFF",
+            "TXDATA",
+            "STATUS",
+            "IRQ_PENDING",
+            "IRQ_ENABLE",
+            "115200 8-N-1",
+            "BTN0",
+            "BTN1",
+            "make soc-check",
+            "make soc-bitstream",
+            "make soc-program",
+            "not architectural access-fault traps",
+            "transmit-only",
+            "no bootloader",
+            "no external memory",
+            "no PLIC",
+            "no operating system",
+            "Physical-board evidence: not published",
+        )
+        for text in required:
+            with self.subTest(text=text):
+                self.assertIn(text, source)
+
+    def test_architecture_names_every_integration_boundary(self) -> None:
+        source = self.read("docs/architecture.md")
+        for name in ("`cpu`", "`rv32i_core`", "`rv32i_soc`", "`arty_a7_35t_top`"):
+            with self.subTest(name=name):
+                self.assertIn(name, source)
+
+    def test_verification_names_soc_units_and_complete_uart_output(self) -> None:
+        source = self.read("docs/verification.md")
+        for name in (
+            "core_external",
+            "csr_external_irq",
+            "wb_master_adapter",
+            "wb_arbiter",
+            "wb_interconnect",
+            "wb_memory",
+            "uart_tx",
+            "wb_uart",
+            "button_debounce",
+            "wb_gpio_irq",
+            "reset_controller",
+            "soc_smoke",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, source)
+        self.assertIn("rv32i soc ready\\nexternal irq\\nexternal irq\\n", source)
+
+    def test_unpublished_board_state_and_coverage_scope_are_explicit(self) -> None:
+        evidence = self.read("docs/evidence.md")
+        coverage = self.read("docs/coverage.md")
+        self.assertIn("Physical-board evidence: not published", evidence)
+        self.assertNotIn("Physical-board evidence: published and validated", evidence)
+        self.assertIn(
+            "SoC unit and integration checks are not part of this core coverage database",
+            coverage,
+        )
 
 
 if __name__ == "__main__":

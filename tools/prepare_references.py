@@ -101,7 +101,12 @@ def load_versions(path: Path) -> dict[str, str]:
         if key in values or not value:
             raise ReferenceError(f"invalid reference metadata key: {key}")
         values[key] = value
-    expected = {"ARCH_TEST_SHA", "ARCH_TEST_EXPECTED", "SPIKE_SHA"}
+    expected = {
+        "ARCH_TEST_SHA",
+        "ARCH_TEST_EXPECTED",
+        "DIGILENT_XDC_SHA",
+        "SPIKE_SHA",
+    }
     if set(values) != expected:
         raise ReferenceError("reference metadata has missing or unknown keys")
     return values

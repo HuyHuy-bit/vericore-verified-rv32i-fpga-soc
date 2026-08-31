@@ -37,6 +37,14 @@ central reference metadata by `make evidence-check`.
 Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
 <!-- portfolio:status:end -->
 
+## Physical-board evidence
+
+<!-- portfolio:soc:start -->
+Physical-board evidence: not published
+<!-- portfolio:soc:end -->
+
+The pending state is intentional. Simulation and board-flow contracts do not prove a physical FPGA run. Publication requires a clean committed checkout, Vivado 2025.2 route with nonnegative WNS and clean DRC, validated firmware/bitstream/report hashes, complete full and SoC verification receipts, the exact UART transcript, and two manually observed BTN1/LED events. The collector accepts no command-line measurement overrides; see the [SoC guide](soc.md).
+
 ## Current verification measurements
 
 <!-- portfolio:verification:start -->

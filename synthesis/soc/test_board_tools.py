@@ -14,7 +14,14 @@ from synthesis.soc import run_board
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "synthesis/soc/run_board.py"
-XDC_SHA = "00a3404901f35aa9567b01ecb3f2c233b6efe9f4"
+REFERENCE_VERSIONS = dict(
+    line.split("=", 1)
+    for line in (ROOT / "tools/reference_versions.env").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    if line and not line.startswith("#")
+)
+XDC_SHA = REFERENCE_VERSIONS["DIGILENT_XDC_SHA"]
 EXPECTED_PINS = {
     "clk100": "E3",
     "btn[0]": "D9",

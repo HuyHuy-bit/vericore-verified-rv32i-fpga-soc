@@ -39,6 +39,10 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
 <!-- portfolio:status:end -->
 
+<!-- portfolio:soc:start -->
+Physical-board evidence: not published
+<!-- portfolio:soc:end -->
+
 ## Portfolio snapshot
 
 <!-- portfolio:snapshot:start -->
@@ -87,6 +91,17 @@ The redirect priority is `freeze > trap > mispredict > load-use stall > predict 
 - Configurable backing-memory latency and Block-RAM-oriented cache arrays.
 - `FENCE.I` invalidates the I-cache and restarts fetch; `FENCE` is a no-op for this single-hart, in-order design.
 
+## Board-ready SoC
+
+The external-memory form of the core is integrated with a fair Wishbone fabric, separate 32 KiB instruction/data BRAMs, a transmit-only UART, four LEDs, and a debounced machine-external interrupt input for the Arty A7-35T. The firmware-level simulator verifies the complete boot message, button bounce rejection, two interrupt responses, LED changes, and continued execution after `MRET`. Physical-board evidence remains unpublished until the guarded Vivado and manual-board procedure produces a validated result record.
+
+```bash
+make soc-check
+make soc-bitstream
+```
+
+See the [Board-ready SoC](docs/soc.md) guide for the memory map, bus contract, firmware, programming flow, and limitations.
+
 ## Quick start
 
 Docker is the only host requirement for the pinned open-source verification path.
@@ -105,10 +120,15 @@ make portfolio-check
 ```text
 rtl/core/          pipeline, control, prediction, CSRs, and counters
 rtl/memory/        backing memories, timing model, LSU, I-cache, D-cache
+rtl/bus/           Wishbone request adapters and arbitration
+rtl/soc/           address decode, BRAM, UART, GPIO, reset, and SoC integration
+rtl/boards/        board-specific top modules
 sim/               Verilator harness and focused SystemVerilog units
 tests/             directed assembly programs and strict references
 compliance/        RISC-V architecture-test target and linker support
 bench/             host-checked C workloads and benchmark runner
+firmware/          freestanding SoC startup, demo, headers, and linker script
+boards/            pinned physical constraints
 verification/      deterministic functional-coverage programs
 synthesis/         Vivado wrapper, constraints, fixtures, and summaries
 tools/             assemblers, models, lockstep, evidence, and environment tools
@@ -120,7 +140,7 @@ results/           compact validated benchmark, synthesis, and tool records
 
 The simulator accepts only explicit completion modes and rejects malformed references, unsuccessful `tohost` values, timeouts, incomplete traces, and stale outputs. Spike lockstep compares complete retirement streams through the terminal self-loop, while architecture signatures provide an independent externally generated test source. See [verification.md](docs/verification.md) for coverage boundaries and failure semantics.
 
-The animated artifact below is a terminal demonstration of the verification and evidence workflow; it is not FPGA board footage.
+The animated artifact below is a terminal recording of the repository verification workflow; it is not FPGA board footage.
 
 ![Portfolio verification demo](docs/media/portfolio-demo.gif)
 
@@ -162,8 +182,8 @@ Exact commands, tool versions, source identities, and synthesis report hashes ar
 ## Design notes and next steps
 
 - The pipeline freezes globally on a memory stall; a decoupled front end is the clearest architectural performance experiment.
-- Instruction and data backing stores are separate simulation-scale arrays. A unified memory or standard bus interface is required for meaningful self-modifying code and SoC integration.
-- External interrupts, M/A/C extensions, and S/U privilege modes are intentionally outside the implemented scope.
+- The board system uses separate BRAM regions behind Wishbone; instruction memory is read-only, so self-modifying code remains outside the contract.
+- The SoC supports one machine-external interrupt source without a PLIC; M/A/C extensions and S/U privilege modes remain outside scope.
 - Random lockstep covers control flow but not randomized traps or CSR state transitions; those remain directed-test territory.
 
 The deeper rationale—including cache inference experiments, exception ordering, and measured trade-offs—is in [architecture.md](docs/architecture.md).
@@ -188,6 +208,7 @@ The deeper rationale—including cache inference experiments, exception ordering
 ## References
 
 - [Architecture and implementation notes](docs/architecture.md)
+- [Board-ready SoC](docs/soc.md)
 - [Verification plan](docs/verification.md)
 - [Evidence ledger](docs/evidence.md)
 - [Result file format](results/FORMAT.md)

@@ -45,6 +45,8 @@ def main():
           "suite and deterministic BTB-alias fixture run against a cache-enabled "
           "build (`make coverage`).")
     print()
+    print("SoC unit and integration checks are not part of this core coverage database.")
+    print()
     print("| Cover point | Hits |")
     print("|---|---|")
     for name in sorted(points):

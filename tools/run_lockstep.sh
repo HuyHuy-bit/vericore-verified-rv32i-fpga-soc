@@ -37,10 +37,10 @@ trap cleanup EXIT
 
 load_versions() {
     local line key value
-    local seen_arch=0 seen_count=0 seen_spike=0
+    local seen_arch=0 seen_count=0 seen_xdc=0 seen_spike=0
     [ -f "$VERSION_FILE" ] || die "reference version file missing: $VERSION_FILE"
     [ -r "$VERSION_FILE" ] || die "reference version file unreadable: $VERSION_FILE"
-    ARCH_TEST_SHA=""; ARCH_TEST_EXPECTED=""; SPIKE_SHA=""
+    ARCH_TEST_SHA=""; ARCH_TEST_EXPECTED=""; DIGILENT_XDC_SHA=""; SPIKE_SHA=""
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in '' | \#*) continue ;; esac
         if [[ ! "$line" =~ ^([A-Z_][A-Z0-9_]*)=([^[:space:]#]+)$ ]]; then
@@ -54,6 +54,9 @@ load_versions() {
             ARCH_TEST_EXPECTED)
                 [ "$seen_count" -eq 0 ] || die "duplicate reference version key: $key"
                 ARCH_TEST_EXPECTED="$value"; seen_count=1 ;;
+            DIGILENT_XDC_SHA)
+                [ "$seen_xdc" -eq 0 ] || die "duplicate reference version key: $key"
+                DIGILENT_XDC_SHA="$value"; seen_xdc=1 ;;
             SPIKE_SHA)
                 [ "$seen_spike" -eq 0 ] || die "duplicate reference version key: $key"
                 SPIKE_SHA="$value"; seen_spike=1 ;;
@@ -62,6 +65,8 @@ load_versions() {
     done < "$VERSION_FILE"
     [[ "$ARCH_TEST_SHA" =~ ^[0-9a-f]{40}$ ]] \
         || die "malformed reference version metadata: ARCH_TEST_SHA"
+    [ "$seen_xdc" -eq 0 ] || [[ "$DIGILENT_XDC_SHA" =~ ^[0-9a-f]{40}$ ]] \
+        || die "malformed reference version metadata: DIGILENT_XDC_SHA"
     [[ "$SPIKE_SHA" =~ ^[0-9a-f]{40}$ ]] \
         || die "malformed reference version metadata: SPIKE_SHA"
     [[ "$ARCH_TEST_EXPECTED" =~ ^[1-9][0-9]*$ ]] \

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -20,6 +21,7 @@ from tools.results import (
     coverage_counts,
     load_result_set,
     validate_result_set,
+    write_profile_receipt,
     write_verification_receipt,
 )
 from synthesis.summarize_reports import SYNTHESIS_FIELDS as SUMMARY_SYNTHESIS_FIELDS
@@ -379,6 +381,31 @@ class ResultSetTest(unittest.TestCase):
             )
         )
 
+    def test_current_verification_cannot_omit_an_rtl_assertion(self) -> None:
+        value = self.verification()
+        value["assertions"]["concurrent"] -= 1
+        self.write_json("verification.json", value)
+        self.refresh_manifest()
+        self.assertTrue(
+            any("assertion counts" in error for error in validate_result_set(
+                self.results, self.checkout
+            ))
+        )
+
+    def test_current_verification_and_manifest_cannot_omit_a_cover(self) -> None:
+        value = self.verification()
+        value["cover_points"] = {"source": 43, "hit": 43}
+        self.write_json("verification.json", value)
+        manifest = json.loads(
+            (self.results / "manifest.json").read_text(encoding="utf-8")
+        )
+        manifest["expected"]["cover_points"] = 43
+        self.write_json("manifest.json", manifest)
+        self.refresh_manifest()
+        errors = validate_result_set(self.results, self.checkout)
+        self.assertTrue(any("cover-point counts" in error for error in errors))
+        self.assertTrue(any("manifest expected cover_points" in error for error in errors))
+
     def test_duplicate_csv_heading_is_rejected(self) -> None:
         path = self.results / "benchmarks.csv"
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -465,6 +492,376 @@ class ResultSetTest(unittest.TestCase):
         self.assertEqual(validate_result_set(output, self.checkout), [])
 
 
+class SocResultTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-soc-result-")
+        self.checkout = Path(self.tmp.name) / "repo"
+        self.results = self.checkout / "results"
+        (self.checkout / "rtl").mkdir(parents=True)
+        (self.checkout / "tools").mkdir()
+        (self.checkout / "boards").mkdir()
+        self.results.mkdir()
+        (self.checkout / "rtl/core.sv").write_text(
+            "module core;\n"
+            + "\n".join(f"a{i}: assert property (1);" for i in range(25))
+            + "\n"
+            + "\n".join(f"i{i}: assert (1);" for i in range(2))
+            + "\n"
+            + "\n".join(f"c{i}: cover property (1);" for i in range(44))
+            + "\nendmodule\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "tools/test_harness.py").write_text(
+            "class HarnessTests:\n"
+            "    def test_first(self): pass\n"
+            "    def test_second(self): pass\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "tools/reference_versions.env").write_text(
+            f"ARCH_TEST_SHA={SHA_A}\nARCH_TEST_EXPECTED="
+            + "".join(("3", "8"))
+            + "\n"
+            f"DIGILENT_XDC_SHA={'c' * 40}\nSPIKE_SHA={SHA_B}\n",
+            encoding="utf-8",
+        )
+        (self.checkout / "boards/arty_a7_35t.xdc").write_text(
+            "# https://github.com/Digilent/digilent-xdc/blob/"
+            + "c" * 40
+            + "/Arty-A7-35-Master.xdc\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init", "-q"], cwd=self.checkout, check=True)
+        subprocess.run(
+            ["git", "config", "user.name", "Fixture"], cwd=self.checkout, check=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "fixture@example.com"],
+            cwd=self.checkout,
+            check=True,
+        )
+        subprocess.run(["git", "add", "."], cwd=self.checkout, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "rtl"], cwd=self.checkout, check=True
+        )
+        self.rtl_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True
+        ).strip()
+        (self.checkout / "tool.txt").write_text("collector\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tool.txt"], cwd=self.checkout, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "tooling"], cwd=self.checkout, check=True
+        )
+        self.tooling_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True
+        ).strip()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def value(self) -> dict[str, object]:
+        return {
+            "schema": 1,
+            "measured_at": "2026-08-30T12:34:56Z",
+            "tooling_commit": self.tooling_commit,
+            "rtl_commit": self.rtl_commit,
+            "board": "arty-a7-35t",
+            "part": "xc7a35ticsg324-1L",
+            "digilent_xdc_sha": "c" * 40,
+            "firmware_sha256": {
+                "elf": "1" * 64,
+                "imem": "2" * 64,
+                "dmem": "3" * 64,
+            },
+            "bitstream_sha256": "4" * 64,
+            "vivado": {
+                "version": "2025.2",
+                "build": "6299465",
+                "platform": "wsl-windows",
+            },
+            "route": {
+                "clock_period_ns": "10.000",
+                "wns_ns": "0.250",
+                "critical_path_ns": "9.750",
+                "fmax_mhz": "102.564",
+                "lut": 10000,
+                "ff": 14000,
+                "bram_tiles": "20.0",
+                "timing_sha256": "5" * 64,
+                "utilization_sha256": "6" * 64,
+                "drc_sha256": "7" * 64,
+            },
+            "verification": {
+                "full_status": "complete",
+                "soc_status": "complete",
+                "full_receipt_sha256": "8" * 64,
+                "soc_receipt_sha256": "9" * 64,
+            },
+            "uart": {
+                "transcript_sha256": "a" * 64,
+                "lines": ["rv32i soc ready", "external irq", "external irq"],
+            },
+            "manual_observations": {
+                "reset_banner": True,
+                "button_presses": 2,
+                "led_transitions": 2,
+                "release_transitions": 0,
+            },
+        }
+
+    def write(self, value: object) -> None:
+        (self.results / "soc.json").write_text(
+            json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def validate(self) -> list[str]:
+        self.assertTrue(hasattr(results_module, "validate_soc_result"))
+        return results_module.validate_soc_result(self.results, self.checkout)
+
+    def test_optional_soc_result_is_absent_or_strictly_valid(self) -> None:
+        self.assertEqual(self.validate(), [])
+        self.write(self.value())
+        self.assertEqual(self.validate(), [])
+
+    def test_soc_result_rejects_missing_unknown_and_duplicate_fields(self) -> None:
+        value = self.value()
+        del value["board"]
+        self.write(value)
+        self.assertTrue(any("missing field" in error for error in self.validate()))
+        value = self.value()
+        value["unknown"] = 1
+        self.write(value)
+        self.assertTrue(any("unknown field" in error for error in self.validate()))
+        (self.results / "soc.json").write_text(
+            '{"schema":1,"schema":1}\n', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ResultError, "duplicate JSON key"):
+            self.validate()
+
+    def test_soc_result_rejects_invalid_identity_timing_and_observations(self) -> None:
+        cases = (
+            (("part",), "xc7a100tcsg324-1", "part"),
+            (("digilent_xdc_sha",), "C" * 40, "Digilent"),
+            (("route", "clock_period_ns"), "9.000", "10.000"),
+            (("route", "wns_ns"), "-0.100", "nonnegative"),
+            (("uart", "lines"), ["rv32i soc ready"], "UART"),
+            (("manual_observations", "button_presses"), 1, "button"),
+        )
+        for path, replacement, diagnostic in cases:
+            with self.subTest(path=path):
+                value = copy.deepcopy(self.value())
+                target = value
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = replacement
+                self.write(value)
+                self.assertTrue(
+                    any(diagnostic in error for error in self.validate()),
+                    self.validate(),
+                )
+
+    def test_soc_result_requires_recorded_commits_and_unchanged_rtl(self) -> None:
+        value = self.value()
+        value["tooling_commit"] = "f" * 40
+        self.write(value)
+        self.assertTrue(any("tooling commit does not exist" in e for e in self.validate()))
+        (self.checkout / "rtl/core.sv").write_text(
+            "module core; logic changed; endmodule\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "rtl/core.sv"], cwd=self.checkout, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "change rtl"], cwd=self.checkout, check=True
+        )
+        changed = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True
+        ).strip()
+        value = self.value()
+        value["tooling_commit"] = changed
+        self.write(value)
+        self.assertTrue(any("RTL differs" in e for e in self.validate()))
+
+    def collection_inputs(self) -> dict[str, Path]:
+        raw = self.checkout / "raw"
+        board = raw / "board"
+        firmware = raw / "firmware"
+        receipts = raw / "receipts"
+        for path in (board, firmware, receipts):
+            path.mkdir(parents=True, exist_ok=True)
+        artifacts = {
+            "bitstream": board / "rv32i-soc-arty-a7-35t.bit",
+            "utilization": board / "utilization.rpt",
+            "timing": board / "timing_summary.rpt",
+            "drc": board / "drc.rpt",
+        }
+        artifacts["bitstream"].write_bytes(b"bitstream\n")
+        artifacts["utilization"].write_text(
+            "| Slice LUTs | 10,000 |\n"
+            "| Slice Registers | 14,000 |\n"
+            "| Block RAM Tile | 20.0 |\n"
+            "| RAMB18 | 40 |\n",
+            encoding="utf-8",
+        )
+        artifacts["timing"].write_text("WNS(ns)\n--------\n0.250\n", encoding="utf-8")
+        artifacts["drc"].write_text("DRC clean\n", encoding="utf-8")
+        image = "00000000\n" * 8192
+        elf = firmware / "firmware.elf"
+        imem = firmware / "firmware-imem.hex"
+        dmem = firmware / "firmware-dmem.hex"
+        elf.write_bytes(b"ELF fixture\n")
+        imem.write_text(image, encoding="ascii")
+        dmem.write_text(image, encoding="ascii")
+        digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        firmware_manifest = firmware / "manifest.json"
+        firmware_manifest.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "status": "complete",
+                    "entry": 0,
+                    "elf": {"path": str(elf), "sha256": digest(elf)},
+                    "imem": {
+                        "path": str(imem), "words": 8192, "sha256": digest(imem)
+                    },
+                    "dmem": {
+                        "path": str(dmem), "words": 8192, "sha256": digest(dmem)
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        board_manifest = board / "manifest.json"
+        board_manifest.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "status": "complete",
+                    "measured_at": "2026-08-30T12:34:56Z",
+                    "source_commit": self.tooling_commit,
+                    "rtl_commit": self.rtl_commit,
+                    "part": "xc7a35ticsg324-1L",
+                    "top": "arty_a7_35t_top",
+                    "clock_period_ns": 10.0,
+                    "wns_ns": 0.25,
+                    "firmware": {
+                        "imem_sha256": digest(imem), "dmem_sha256": digest(dmem)
+                    },
+                    "xdc_sha256": digest(self.checkout / "boards/arty_a7_35t.xdc"),
+                    "vivado": {
+                        "version": "2025.2",
+                        "build": "6299465",
+                        "platform": "wsl-windows",
+                        "launcher": "/tools/vivado",
+                    },
+                    "invocation": ["-mode", "batch"],
+                    "outputs": {name: digest(path) for name, path in artifacts.items()},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        full = ResultSetTest.verification(self)
+        full["tooling_commit"] = self.tooling_commit
+        full["rtl_commit"] = self.rtl_commit
+        full_receipt = receipts / "full.json"
+        full_receipt.write_text(
+            json.dumps(full, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        soc_receipt = receipts / "soc.json"
+        soc_receipt.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "measured_at": "2026-08-30T12:30:00Z",
+                    "profile": "soc",
+                    "status": "complete",
+                    "tooling_commit": self.tooling_commit,
+                    "rtl_commit": self.rtl_commit,
+                    "commands": ["make soc-check"],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        uart = raw / "uart.txt"
+        uart.write_text(
+            "rv32i soc ready\nexternal irq\nexternal irq\n", encoding="utf-8"
+        )
+        observations = raw / "observations.json"
+        observations.write_text(
+            json.dumps(
+                {
+                    "reset_banner": True,
+                    "button_presses": 2,
+                    "led_transitions": 2,
+                    "release_transitions": 0,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "board": board_manifest,
+            "firmware": firmware_manifest,
+            "verification": full_receipt,
+            "soc_verification": soc_receipt,
+            "uart": uart,
+            "observations": observations,
+            "bitstream": artifacts["bitstream"],
+        }
+
+    def collect(self, inputs: dict[str, Path], output: Path | None = None) -> int:
+        return results_module.main([
+            "collect-soc",
+            "--board-manifest", str(inputs["board"]),
+            "--firmware-manifest", str(inputs["firmware"]),
+            "--verification", str(inputs["verification"]),
+            "--soc-verification", str(inputs["soc_verification"]),
+            "--uart", str(inputs["uart"]),
+            "--observations", str(inputs["observations"]),
+            "--output", str(output or self.results / "soc.json"),
+        ])
+
+    def test_collect_soc_derives_and_validates_the_complete_record(self) -> None:
+        inputs = self.collection_inputs()
+        inputs["uart"].write_bytes(
+            b"rv32i soc ready\r\nexternal irq\r\nexternal irq\r\n"
+        )
+        self.assertEqual(self.collect(inputs), 0)
+        value = json.loads((self.results / "soc.json").read_text(encoding="utf-8"))
+        self.assertEqual(value["uart"]["lines"], [
+            "rv32i soc ready", "external irq", "external irq"
+        ])
+        self.assertEqual(value["route"]["lut"], 10000)
+        self.assertEqual(value["route"]["fmax_mhz"], "102.564")
+        self.assertEqual(
+            value["uart"]["transcript_sha256"],
+            hashlib.sha256(
+                b"rv32i soc ready\nexternal irq\nexternal irq\n"
+            ).hexdigest(),
+        )
+        self.assertEqual(self.validate(), [])
+
+    def test_collect_soc_rejects_tampering_prefixes_and_raw_destinations(self) -> None:
+        inputs = self.collection_inputs()
+        inputs["bitstream"].write_bytes(b"tampered\n")
+        self.assertNotEqual(self.collect(inputs), 0)
+        self.assertFalse((self.results / "soc.json").exists())
+        inputs = self.collection_inputs()
+        inputs["uart"].write_text("rv32i soc ready\n", encoding="utf-8")
+        self.assertNotEqual(self.collect(inputs), 0)
+        inputs = self.collection_inputs()
+        self.assertNotEqual(
+            self.collect(inputs, inputs["board"].parent / "soc.json"), 0
+        )
+
+
 class VerificationReceiptTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(prefix="rv32i-receipt-")
@@ -525,6 +922,19 @@ class VerificationReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(ResultError, "coverage result is missing"):
             write_verification_receipt(self.checkout, output)
         self.assertEqual(output.read_text(encoding="utf-8"), "previous\n")
+
+    @mock.patch("tools.results.git_text", side_effect=(SHA_A, SHA_B))
+    def test_soc_profile_writes_a_minimal_atomic_receipt(self, git: mock.Mock) -> None:
+        output = self.checkout / "run/soc-verification.json"
+        write_profile_receipt(self.checkout, output, "soc")
+        value = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(set(value), results_module.SOC_RECEIPT_FIELDS)
+        self.assertEqual(value["profile"], "soc")
+        self.assertEqual(value["status"], "complete")
+        self.assertEqual(value["commands"], ["make soc-check"])
+        self.assertEqual(value["tooling_commit"], SHA_A)
+        self.assertEqual(value["rtl_commit"], SHA_B)
+        self.assertEqual(git.call_count, 2)
 
     def test_incomplete_coverage_is_rejected(self) -> None:
         path = self.checkout / "coverage/merged.dat"

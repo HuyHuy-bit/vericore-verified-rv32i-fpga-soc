@@ -1008,6 +1008,7 @@ class ComplianceRunnerTest(unittest.TestCase):
     """Exercise a copied runner in an isolated, one-case mini-repository."""
 
     PINNED_ARCH_SHA = REFERENCE_VERSIONS["ARCH_TEST_SHA"]
+    PINNED_XDC_SHA = REFERENCE_VERSIONS["DIGILENT_XDC_SHA"]
     PINNED_SPIKE_SHA = REFERENCE_VERSIONS["SPIKE_SHA"]
 
     def setUp(self):
@@ -1061,6 +1062,7 @@ class ComplianceRunnerTest(unittest.TestCase):
         self.versions.write_text(contents or (
             f"ARCH_TEST_SHA={self.PINNED_ARCH_SHA}\n"
             "ARCH_TEST_EXPECTED=1\n"
+            f"DIGILENT_XDC_SHA={self.PINNED_XDC_SHA}\n"
             f"SPIKE_SHA={self.PINNED_SPIKE_SHA}\n"
         ))
 
@@ -1534,7 +1536,8 @@ class LockstepWrapperTest(unittest.TestCase):
         shutil.copy2(ROOT / "tools/run_lockstep.sh", self.repo / "tools/run_lockstep.sh")
         self.versions = self.repo / "tools/reference_versions.env"
         self.versions.write_text(
-            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED=1\nSPIKE_SHA=" + "b" * 40 + "\n"
+            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED=1\nDIGILENT_XDC_SHA="
+            + "c" * 40 + "\nSPIKE_SHA=" + "b" * 40 + "\n"
         )
         for path in (self.repo / "compliance/link/spike-lockstep.ld",
                      self.repo / "compliance/elf2hex.py",
@@ -1708,7 +1711,8 @@ class SoakLockstepWrapperTest(unittest.TestCase):
                      self.repo / "compliance/link/spike-lockstep.ld"):
             path.write_text("")
         (self.repo / "tools/reference_versions.env").write_text(
-            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED=1\nSPIKE_SHA=" + "b" * 40 + "\n"
+            "ARCH_TEST_SHA=" + "a" * 40 + "\nARCH_TEST_EXPECTED=1\nDIGILENT_XDC_SHA="
+            + "c" * 40 + "\nSPIKE_SHA=" + "b" * 40 + "\n"
         )
         self.sim = self.repo / "obj_dir_lockstep/Vcpu"
         self.sim.write_text("#!/usr/bin/env bash\nexit 0\n")
