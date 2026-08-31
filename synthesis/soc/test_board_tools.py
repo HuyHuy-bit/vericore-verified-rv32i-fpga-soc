@@ -146,6 +146,12 @@ class BoardContractTest(unittest.TestCase):
         self.assertNotIn("REGISTER.CONFIG_STATUS.CFG_DONE", source)
         self.assertIn('error "FPGA configuration did not complete"', source)
 
+    def test_failed_timing_prints_routed_critical_paths(self) -> None:
+        source = (ROOT / "synthesis/soc/build.tcl").read_text(encoding="utf-8")
+        report = source.index("report_timing -delay_type max")
+        rejection = source.index('error "setup timing failed with WNS $wns"')
+        self.assertLess(report, rejection)
+
 
 class BoardRunnerTest(unittest.TestCase):
     def setUp(self) -> None:

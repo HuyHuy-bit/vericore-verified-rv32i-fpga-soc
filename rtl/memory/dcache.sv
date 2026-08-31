@@ -116,6 +116,9 @@ module dcache #(
 
     logic            is_store, line_present, wt_store, bypass, direct_request;
     logic            flush_start, flush_complete;
+    logic [1:0]      state;
+    logic direct_active;
+    logic direct_done;
     assign is_store     = |byte_en;
     assign line_present = |way_hit;
     // A write-through store always goes to memory, resident or not.
@@ -126,11 +129,8 @@ module dcache #(
     assign direct_request = bypass || ((state == S_IDLE) && !flush_start
                             && req && cacheable && wt_store);
 
-    logic [1:0]      state;
     logic [OFFW-1:0] fill_word, wb_word;
     logic [WAYW-1:0] fill_way;
-    logic direct_active;
-    logic direct_done;
     logic [XLEN-1:0] direct_read_word;
 
     always_ff @(posedge clk) begin

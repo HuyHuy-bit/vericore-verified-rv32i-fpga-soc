@@ -38,6 +38,8 @@ if {[llength $setup_path] != 1} {
     error "no setup timing path was reported"
 }
 set wns [get_property SLACK $setup_path]
+report_timing -delay_type max -max_paths 10 -nworst 1 \
+    -path_type full_clock_expanded
 if {$wns < 0.0} {
     error "setup timing failed with WNS $wns"
 }

@@ -92,12 +92,11 @@ module backend #(
     // the rs1 field instead of a register value.
     logic [11:0] csr_addr_id;
     logic [XLEN-1:0] csr_wdata_id;
+    logic [XLEN-1:0] reg_rs1_data_id, reg_rs2_data_id;
+    logic [XLEN-1:0] write_back_data;
     assign csr_addr_id  = if_id_q.instr[31:20];
     // CSRRWI/SI/CI zero-extend a 5-bit uimm to the datapath width.
     assign csr_wdata_id = funct3_id[2] ? XLEN'(rs1_addr_id) : reg_rs1_data_id;
-
-    logic [XLEN-1:0] reg_rs1_data_id, reg_rs2_data_id;
-    logic [XLEN-1:0] write_back_data; // driven by WB stage, below
 
     reg_file u_reg_file (
         .clk(clk), .rst(rst),
@@ -186,7 +185,7 @@ module backend #(
     // instruction it's the old CSR value, otherwise the ALU result. Forwarding
     // must use THIS, not raw ex_mem_q.alu_result, or a CSR read forwarded to the
     // next instruction delivers garbage.
-    logic [XLEN-1:0] mem_fwd_value;
+    logic [XLEN-1:0] mem_fwd_value, csr_rdata_commit;
     assign mem_fwd_value = ex_mem_q.is_csr ? csr_rdata_commit : ex_mem_q.alu_result;
 
     logic [XLEN-1:0] rs1_data_ex_fwd, rs2_data_ex_fwd;
@@ -538,7 +537,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
     assign trap_pc_w       = irq_take ? ex_mem_q.next_pc : ex_mem_q.pc;
     assign trap_cause_final = irq_take ? irq_cause : trap_cause_w;
 
-    logic [XLEN-1:0] mtvec_val, mepc_val, csr_rdata_commit;
+    logic [XLEN-1:0] mtvec_val, mepc_val;
     csr u_csr (
         .clk(clk), .rst(rst),
         .csr_access(csr_commit),
