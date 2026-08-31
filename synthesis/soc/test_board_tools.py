@@ -138,6 +138,8 @@ class BoardContractTest(unittest.TestCase):
 
     def test_program_tcl_checks_the_jtag_visible_die_and_done_bit(self) -> None:
         source = (ROOT / "synthesis/soc/program.tcl").read_text(encoding="utf-8")
+        self.assertIn("set targets [get_hw_targets]", source)
+        self.assertIn('error "expected exactly one hardware target"', source)
         self.assertIn(
             'string tolower [get_property PART $device]] ne "xc7a35t"',
             source,
@@ -503,6 +505,14 @@ class BoardRunnerTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bitstream must use the .bit extension", result.stderr)
+
+    def test_program_cleanup_is_best_effort(self) -> None:
+        source = RUNNER.read_text(encoding="utf-8")
+        start = source.index("def run_program(")
+        end = source.index("\ndef parse_args(", start)
+        body = source[start:end]
+        self.assertNotIn("with tempfile.TemporaryDirectory", body)
+        self.assertIn("shutil.rmtree(stage, ignore_errors=True)", body)
 
 
 if __name__ == "__main__":

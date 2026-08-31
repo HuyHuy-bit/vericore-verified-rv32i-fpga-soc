@@ -345,10 +345,8 @@ def run_program(root: Path, bitstream: Path, timeout: int) -> None:
     if not script.is_file():
         raise BoardError(f"programming script does not exist: {script}")
     tool, stage_parent = discover_tool(dict(os.environ))
-    with tempfile.TemporaryDirectory(
-        prefix="rv32i-soc-program-", dir=stage_parent
-    ) as stage_name:
-        stage = Path(stage_name)
+    stage = Path(tempfile.mkdtemp(prefix="rv32i-soc-program-", dir=stage_parent))
+    try:
         shutil.copy2(script, stage / "program.tcl")
         shutil.copy2(bitstream, stage / "image.bit")
         arguments = (
@@ -363,6 +361,8 @@ def run_program(root: Path, bitstream: Path, timeout: int) -> None:
         console = run_vivado(tool, arguments, stage, timeout, "programming")
         if PROGRAM_MARKER not in console:
             raise BoardError("program completion marker missing")
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

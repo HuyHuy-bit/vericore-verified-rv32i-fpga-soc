@@ -10,6 +10,11 @@ if {[file pathtype $bitstream] ne "absolute" || ![file isfile $bitstream]} {
 open_hw_manager
 try {
     connect_hw_server
+    set targets [get_hw_targets]
+    if {[llength $targets] != 1} {
+        error "expected exactly one hardware target"
+    }
+    current_hw_target [lindex $targets 0]
     open_hw_target
     set devices [get_hw_devices]
     if {[llength $devices] != 1} {
