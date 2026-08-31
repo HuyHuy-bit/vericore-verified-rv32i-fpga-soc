@@ -137,6 +137,16 @@ class ContainerCommandTest(unittest.TestCase):
         self.assertIn('$(SOC_START_OBJ) $(SOC_DEMO_OBJ)', source)
         self.assertNotIn('-o "$(SOC_ELF)" firmware/start.S firmware/demo.c', source)
 
+    def test_soc_firmware_reuses_complete_current_outputs(self):
+        source = (ROOT / "Makefile").read_text(encoding="utf-8")
+        phony = next(line for line in source.splitlines() if line.startswith(".PHONY:"))
+        self.assertNotIn("soc-firmware", phony.split())
+        self.assertIn(
+            "$(SOC_ELF) $(SOC_IMEM) $(SOC_DMEM) $(SOC_MANIFEST) &:",
+            source,
+        )
+        self.assertIn("soc-firmware: $(SOC_ELF) $(SOC_IMEM) $(SOC_DMEM) $(SOC_MANIFEST)", source)
+
     def test_build_uses_every_manifest_value_and_selected_target(self):
         command = build_image_command(ROOT, "demo")
         self.assertEqual(command[:3], ("docker", "build", "--target"))

@@ -82,7 +82,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-firmware soc-unit soc-sim soc-lint soc-board-test soc-check soc-bitstream soc-program
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-unit soc-sim soc-lint soc-board-test soc-check soc-bitstream soc-program
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -139,7 +139,10 @@ unit:
 soc-image-test:
 	python3 -m unittest -v tools.test_soc_image
 
-soc-firmware:
+soc-firmware: $(SOC_ELF) $(SOC_IMEM) $(SOC_DMEM) $(SOC_MANIFEST)
+
+$(SOC_ELF) $(SOC_IMEM) $(SOC_DMEM) $(SOC_MANIFEST) &: firmware/start.S \
+		firmware/demo.c firmware/soc.h firmware/link.ld tools/soc_image.py Makefile
 	mkdir -p "$(SOC_BUILD_DIR)"
 	$(SOC_GCC) -march=$(SOC_MARCH) -mabi=ilp32 \
 		-ffreestanding -fno-builtin -fno-pic -mno-relax -Os \
