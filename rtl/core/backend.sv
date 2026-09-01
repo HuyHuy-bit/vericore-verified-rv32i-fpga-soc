@@ -13,11 +13,12 @@ module backend #(
     parameter int DCACHE_BLOCK_WORDS = 4,
     parameter int DCACHE_WAYS        = 1,
     parameter int DCACHE_WRITE_BACK  = 0,
-    parameter int DMEM_LATENCY       = 1,
-    parameter int DMEM_DEPTH_WORDS   = 16384
+    parameter logic [XLEN-1:0] DCACHEABLE_BASE = '0,
+    parameter logic [XLEN-1:0] DCACHEABLE_MASK = '0
 ) (
     input  var logic        clk,
     input  var logic        rst,
+    input  var logic        irq_external,
     input  var logic        pipe_stall,
     input  var if_id_t      if_id_q,          // payload from the front end
 
@@ -51,7 +52,15 @@ module backend #(
     input  var logic [XLEN-1:0] perf_instr_retired,
 
     input  var logic        dbg_flush,
-    output var logic        dbg_flush_done
+    output var logic        dbg_flush_done,
+
+    output var logic        ext_dmem_req,
+    output var logic        ext_dmem_burst,
+    output var logic [XLEN-1:0] ext_dmem_addr,
+    output var logic [XBYTES-1:0] ext_dmem_wstrb,
+    output var logic [XLEN-1:0] ext_dmem_wdata,
+    input  var logic [XLEN-1:0] ext_dmem_rdata,
+    input  var logic        ext_dmem_ready
 );
 
     // ID stage
@@ -83,12 +92,11 @@ module backend #(
     // the rs1 field instead of a register value.
     logic [11:0] csr_addr_id;
     logic [XLEN-1:0] csr_wdata_id;
+    logic [XLEN-1:0] reg_rs1_data_id, reg_rs2_data_id;
+    logic [XLEN-1:0] write_back_data;
     assign csr_addr_id  = if_id_q.instr[31:20];
     // CSRRWI/SI/CI zero-extend a 5-bit uimm to the datapath width.
     assign csr_wdata_id = funct3_id[2] ? XLEN'(rs1_addr_id) : reg_rs1_data_id;
-
-    logic [XLEN-1:0] reg_rs1_data_id, reg_rs2_data_id;
-    logic [XLEN-1:0] write_back_data; // driven by WB stage, below
 
     reg_file u_reg_file (
         .clk(clk), .rst(rst),
@@ -177,7 +185,7 @@ module backend #(
     // instruction it's the old CSR value, otherwise the ALU result. Forwarding
     // must use THIS, not raw ex_mem_q.alu_result, or a CSR read forwarded to the
     // next instruction delivers garbage.
-    logic [XLEN-1:0] mem_fwd_value;
+    logic [XLEN-1:0] mem_fwd_value, csr_rdata_commit;
     assign mem_fwd_value = ex_mem_q.is_csr ? csr_rdata_commit : ex_mem_q.alu_result;
 
     logic [XLEN-1:0] rs1_data_ex_fwd, rs2_data_ex_fwd;
@@ -345,6 +353,8 @@ ex_mem_t ex_mem_d, ex_mem_q;
         ex_mem_d.alu_result   = alu_result_ex;
         ex_mem_d.rs2_data     = rs2_data_ex_fwd;
         ex_mem_d.pc_plus4     = id_ex_q.pc_plus4;
+        ex_mem_d.next_pc      = is_cf_instr && actual_taken
+                                ? actual_target : id_ex_q.pc_plus4;
         ex_mem_d.rd_addr      = id_ex_q.rd_addr;
         ex_mem_d.funct3       = id_ex_q.funct3;
         ex_mem_d.reg_write_en = id_ex_q.ctrl.reg_write_en;
@@ -403,6 +413,14 @@ ex_mem_t ex_mem_d, ex_mem_q;
     logic [XBYTES-1:0] dc_mem_byte_en;
     logic        dc_mem_req, dc_mem_burst, dc_mem_ready;
 
+    assign ext_dmem_req   = dc_mem_req;
+    assign ext_dmem_burst = dc_mem_burst;
+    assign ext_dmem_addr  = dc_mem_addr;
+    assign ext_dmem_wstrb = dc_mem_byte_en;
+    assign ext_dmem_wdata = dc_mem_write_word;
+    assign dc_mem_read_word = ext_dmem_rdata;
+    assign dc_mem_ready = ext_dmem_ready;
+
     if (DCACHE_BYTES == 0) begin : g_no_dcache
         assign dc_mem_addr       = ex_mem_q.alu_result;
         assign dc_mem_req        = dmem_req;
@@ -415,6 +433,12 @@ ex_mem_t ex_mem_d, ex_mem_q;
         assign dcache_miss       = 1'b0;
         assign dbg_flush_done    = dbg_flush;   // nothing cached, nothing to do
     end else begin : g_dcache
+        logic dmem_cacheable;
+
+        assign dmem_cacheable = (DCACHEABLE_MASK == '0)
+                                || ((ex_mem_q.alu_result & DCACHEABLE_MASK)
+                                    == DCACHEABLE_BASE);
+
         dcache #(
             .BYTES(DCACHE_BYTES),
             .BLOCK_WORDS(DCACHE_BLOCK_WORDS),
@@ -422,7 +446,8 @@ ex_mem_t ex_mem_d, ex_mem_q;
             .WRITE_BACK(DCACHE_WRITE_BACK)
         ) u_dcache (
             .clk(clk), .rst(rst),
-            .req(dmem_req), .advance(!pipe_stall), .addr(ex_mem_q.alu_result),
+            .req(dmem_req), .cacheable(dmem_cacheable),
+            .advance(!pipe_stall), .addr(ex_mem_q.alu_result),
             .byte_en(dm_byte_en), .write_word(dm_store_word),
             .read_word(dm_read_word), .ready(dmem_ready),
             .mem_addr(dc_mem_addr), .mem_req(dc_mem_req), .mem_burst(dc_mem_burst),
@@ -432,14 +457,6 @@ ex_mem_t ex_mem_d, ex_mem_q;
             .access(dcache_access), .miss_pulse(dcache_miss)
         );
     end
-
-    data_mem #(.LATENCY(DMEM_LATENCY), .DEPTH_WORDS(DMEM_DEPTH_WORDS)) u_data_mem (
-        .clk(clk), .rst(rst),
-        .req(dc_mem_req), .burst(dc_mem_burst),
-        .addr(dc_mem_addr),
-        .byte_en(dc_mem_byte_en), .write_word(dc_mem_write_word),
-        .read_word(dc_mem_read_word), .ready(dc_mem_ready)
-    );
 
     // ---- Commit point: traps, MRET, and CSR writes all resolve here ----
     // This is the single point where control-flow-changing exceptional events
@@ -514,13 +531,13 @@ ex_mem_t ex_mem_d, ex_mem_q;
     // so it re-executes after the handler returns.
     //
     // This is why reg_write_en_mem_gated below is gated on trap_take and NOT
-    // on irq_take: suppressing the register write while resuming at pc+4
+    // on irq_take: suppressing the register write while resuming at the successor
     // would silently drop the instruction's result.
     logic [XLEN-1:0] trap_pc_w, trap_cause_final;
-    assign trap_pc_w       = irq_take ? ex_mem_q.pc_plus4 : ex_mem_q.pc;
+    assign trap_pc_w       = irq_take ? ex_mem_q.next_pc : ex_mem_q.pc;
     assign trap_cause_final = irq_take ? irq_cause : trap_cause_w;
 
-    logic [XLEN-1:0] mtvec_val, mepc_val, csr_rdata_commit;
+    logic [XLEN-1:0] mtvec_val, mepc_val;
     csr u_csr (
         .clk(clk), .rst(rst),
         .csr_access(csr_commit),
@@ -536,6 +553,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
         .mtvec_out(mtvec_val),
         .mret_en(mret_take),
         .mepc_out(mepc_val),
+        .irq_external(irq_external),
         .irq_pending(irq_pending), .irq_cause(irq_cause)
     );
 
@@ -689,7 +707,7 @@ ex_mem_t ex_mem_d, ex_mem_q;
     // An interrupt resumes at the *next* instruction, a trap re-runs the
     // faulting one. Getting these backwards silently drops or repeats work.
     a_irq_mepc_is_next: assert property (@(posedge clk) disable iff (rst)
-        irq_take |-> (trap_pc_w == ex_mem_q.pc_plus4));
+        irq_take |-> (trap_pc_w == ex_mem_q.next_pc));
     a_trap_mepc_is_faulting: assert property (@(posedge clk) disable iff (rst)
         trap_take |-> (trap_pc_w == ex_mem_q.pc));
     // An interrupt lets the instruction in MEM complete; only a synchronous

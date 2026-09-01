@@ -8,7 +8,12 @@ import subprocess
 import tempfile
 import unittest
 
-from tools.prepare_references import ReferenceError, prepare_checkout, prepare_spike
+from tools.prepare_references import (
+    ReferenceError,
+    load_versions,
+    prepare_checkout,
+    prepare_spike,
+)
 
 
 class ReferencePreparationTest(unittest.TestCase):
@@ -54,6 +59,31 @@ class ReferencePreparationTest(unittest.TestCase):
     def test_noncanonical_commit_is_rejected(self) -> None:
         with self.assertRaisesRegex(ReferenceError, "canonical commit"):
             prepare_checkout(self.cache / "reference", str(self.upstream), "HEAD", self.cache)
+
+    def test_board_pin_is_accepted_without_becoming_a_prepared_reference(self) -> None:
+        path = self.root / "versions.env"
+        path.write_text(
+            "ARCH_TEST_SHA=" + "a" * 40 + "\n"
+            "ARCH_TEST_EXPECTED=" + "".join(("3", "8")) + "\n"
+            "DIGILENT_XDC_SHA=" + "b" * 40 + "\n"
+            "SPIKE_SHA=" + "c" * 40 + "\n",
+            encoding="utf-8",
+        )
+        values = load_versions(path)
+        self.assertEqual(values["DIGILENT_XDC_SHA"], "b" * 40)
+
+    def test_unknown_reference_metadata_is_rejected(self) -> None:
+        path = self.root / "versions.env"
+        path.write_text(
+            "ARCH_TEST_SHA=" + "a" * 40 + "\n"
+            "ARCH_TEST_EXPECTED=" + "".join(("3", "8")) + "\n"
+            "DIGILENT_XDC_SHA=" + "b" * 40 + "\n"
+            "SPIKE_SHA=" + "c" * 40 + "\n"
+            "UNKNOWN=value\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ReferenceError, "missing or unknown"):
+            load_versions(path)
 
     def test_spike_build_is_stamped_and_reused(self) -> None:
         repo = self.cache / "spike"

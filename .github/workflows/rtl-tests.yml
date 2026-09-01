@@ -14,6 +14,9 @@ on:
       - 'tools/**'
       - 'tests/**'
       - 'results/**'
+      - 'firmware/**'
+      - 'boards/**'
+      - 'synthesis/soc/**'
       - 'README.md'
       - 'docs/**'
       - '.github/workflows/rtl-tests.yml'
@@ -29,6 +32,9 @@ on:
       - 'tools/**'
       - 'tests/**'
       - 'results/**'
+      - 'firmware/**'
+      - 'boards/**'
+      - 'synthesis/soc/**'
       - 'README.md'
       - 'docs/**'
       - '.github/workflows/rtl-tests.yml'
@@ -54,6 +60,9 @@ jobs:
 
       - name: Run three predictor configurations
         run: python3 tools/verification.py container --profile directed-predictor
+
+      - name: Verify integrated SoC
+        run: python3 tools/verification.py container --profile soc
 
       - name: Validate committed portfolio artifacts
         run: python3 tools/verification.py container --profile portfolio

@@ -24,6 +24,11 @@ lint_off -rule IMPORTSTAR -file "*/ras.sv"
 lint_off -rule IMPORTSTAR -file "*/pc.sv"
 lint_off -rule IMPORTSTAR -file "*/reg_file.sv"
 lint_off -rule IMPORTSTAR -file "*/perf_counters.sv"
+lint_off -rule IMPORTSTAR -file "*/cpu.sv"
+lint_off -rule IMPORTSTAR -file "*/rv32i_core.sv"
+lint_off -rule IMPORTSTAR -file "*/rv32i_soc.sv"
+
+lint_off -rule UNUSEDSIGNAL -file "*/cpu.sv" -match "*retired_debug*"
 
 // ex_mem_q.csr_rdata is latched for a future CSR-forwarding path, not read
 // yet. Reported against the whole packed struct, hence the bit-range match.

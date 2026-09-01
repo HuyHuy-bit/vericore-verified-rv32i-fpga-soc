@@ -2,6 +2,8 @@
 obj_dir*/
 coverage/
 work/
+build/soc/
+build/
 transcript
 xsim.dir/
 csrc/
@@ -22,9 +24,12 @@ compliance/*.hex
 compliance/*.sig.output
 
 # Vivado/synthesis output
+syn/
 synthesis/reports/
 synthesis/.synth-reports-*/
 synthesis/out_*/
+synthesis/soc/out_*/
+.soc-board-*/
 .Xil/
 *.xpr
 *.dcp
@@ -33,6 +38,12 @@ synthesis/out_*/
 *.str
 *.log
 *.rpt
+*.lck
+*.pb
+*.rdi
+*.rpx
+*.wdb
+*.wcfg
 *.cache/
 *.gen/
 *.hw/

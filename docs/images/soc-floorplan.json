@@ -1,0 +1,28 @@
+{
+  "groups": {
+    "board": 29,
+    "core": 10640,
+    "dcache": 14035,
+    "dmem": 76,
+    "fabric": 492,
+    "icache": 2689,
+    "imem": 15
+  },
+  "input_clock_period_ns": 10.0,
+  "occupied_tiles": 2842,
+  "part": "xc7a35ticsg324-1L",
+  "placed_primitives": 27976,
+  "placement_sha256": "ce1ed434d71b112950c09148c3a040927a410ae31b28e3f70066cce63f8a3436",
+  "rtl_commit": "d21ecd3fe310bf49c505220c134f8cfd205c90e5",
+  "schema": 1,
+  "soc_clock_period_ns": 20.0,
+  "source_commit": "d4b9d666a3852098e2001e4052f8ef2f4d0239dd",
+  "svg_sha256": "5ee41b3b0ab21393e53228bdb0b7de87eb18058f15e153abbfbcc4ed80740684",
+  "vivado": {
+    "build": "6299465",
+    "launcher": "/mnt/c/AMDDesignTools/2025.2/Vivado/bin/vivado.bat",
+    "platform": "wsl-windows",
+    "version": "2025.2"
+  },
+  "wns_ns": 2.009
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -12,9 +13,12 @@ from tools.render_portfolio import (
     check_documents,
     render_documents,
     replace_block,
+    soc_status,
     write_documents,
 )
 from tools.results import ResultSet
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PortfolioRendererTest(unittest.TestCase):
@@ -30,16 +34,20 @@ class PortfolioRendererTest(unittest.TestCase):
 
     def write_documents(self) -> None:
         blocks = {
-            "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-            "docs/evidence.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
-            "docs/architecture.md": ("facts", "benchmarks", "synthesis"),
-            "docs/verification.md": ("facts", "summary"),
+            "README.md": ("facts", "status", "soc", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
+            "docs/evidence.md": ("overview", "facts", "status", "soc", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+            "docs/architecture.md": ("facts", "status", "benchmarks", "synthesis"),
+            "docs/verification.md": ("facts", "status", "summary"),
         }
         for relative, names in blocks.items():
             body = [f"# {relative}", ""]
             for name in names:
                 body.extend((f"<!-- portfolio:{name}:start -->", "stale", f"<!-- portfolio:{name}:end -->", ""))
             (self.root / relative).write_text("\n".join(body), encoding="utf-8")
+        (self.root / "docs/coverage.md").write_text(
+            "# Coverage\n\n**Evidence status: current.**\n\n**44/44 cover points hit (100.0%)**\n",
+            encoding="utf-8",
+        )
 
     def result_set(self) -> ResultSet:
         verification = {
@@ -140,6 +148,13 @@ class PortfolioRendererTest(unittest.TestCase):
                 with self.assertRaisesRegex(RenderError, diagnostic):
                     replace_block(source, "x", "new")
 
+    def test_absent_soc_evidence_renders_only_the_pending_state(self) -> None:
+        status = soc_status(self.root / "results")
+        self.assertEqual(status, "Physical-board evidence: not published")
+        self.assertNotIn("LUT", status)
+        self.assertNotIn("MHz", status)
+        self.assertNotIn("passed", status.lower())
+
     def test_render_replaces_every_known_block(self) -> None:
         rendered = render_documents(self.root, self.result)
         self.assertEqual(set(rendered), {
@@ -147,19 +162,67 @@ class PortfolioRendererTest(unittest.TestCase):
             self.root / "docs/evidence.md",
             self.root / "docs/architecture.md",
             self.root / "docs/verification.md",
+            self.root / "docs/coverage.md",
         })
         self.assertIn("25 directed tests × 6 memory configurations", rendered[self.root / "README.md"])
         self.assertIn("66.7–83.3 MHz routed Artix-7 implementations", rendered[self.root / "README.md"])
         self.assertIn("RISC-V assembler 2.42", rendered[self.root / "README.md"])
         self.assertIn("38/38", rendered[self.root / "docs/evidence.md"])
+        self.assertIn(
+            "Physical-board evidence: not published",
+            rendered[self.root / "README.md"],
+        )
+        self.assertIn(
+            "Physical-board evidence: not published",
+            rendered[self.root / "docs/evidence.md"],
+        )
         self.assertIn("`" + "a" * 40 + "`", rendered[self.root / "docs/evidence.md"])
         self.assertIn("`" + "b" * 40 + "`", rendered[self.root / "docs/evidence.md"])
         self.assertIn("`" + "0" * 64 + "` / `" + "4" * 64 + "`", rendered[self.root / "docs/evidence.md"])
-        for value in rendered.values():
-            self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
-            self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
+        for path, value in rendered.items():
+            if path.name != "coverage.md":
+                self.assertEqual(value.count("<!-- evidence-facts:begin -->"), 1)
+                self.assertEqual(value.count("<!-- evidence-facts:end -->"), 1)
             self.assertFalse(any(line != line.rstrip() for line in value.splitlines()))
         self.assertNotIn("\nstale\n", "".join(rendered.values()))
+
+    def test_historical_results_are_labeled_in_every_document(self) -> None:
+        (self.root / "rtl").mkdir()
+        (self.root / "rtl/core.sv").write_text("module core; endmodule\n", encoding="utf-8")
+        (self.root / "sim").mkdir()
+        (self.root / "sim/cpu_tb.cpp").write_text("int main() {}\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "Fixture"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "fixture@example.com"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "measured source"], cwd=self.root, check=True)
+        measured = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+        ).strip()
+        self.result.manifest["rtl_commit"] = measured
+        (self.root / "rtl/core.sv").write_text(
+            "module core; logic later; endmodule\n", encoding="utf-8"
+        )
+        notice = (
+            "Historical measurements — validated for RTL "
+            + measured
+            + "; current RTL changes are not yet remeasured."
+        )
+        rendered = render_documents(self.root, self.result)
+        for relative in (
+            "README.md",
+            "docs/evidence.md",
+            "docs/architecture.md",
+            "docs/verification.md",
+        ):
+            self.assertIn(notice, rendered[self.root / relative])
+            self.assertIn("EVIDENCE_FACT EVIDENCE_STATUS=historical", rendered[self.root / relative])
+        self.assertIn(
+            "**Evidence status: historical.**",
+            rendered[self.root / "docs/coverage.md"],
+        )
 
     def test_check_detects_stale_content_and_write_is_idempotent(self) -> None:
         with mock.patch("tools.render_portfolio.load_validated", return_value=self.result):
@@ -175,6 +238,94 @@ class PortfolioRendererTest(unittest.TestCase):
         with self.assertRaisesRegex(RenderError, "result records"):
             write_documents(self.root)
         self.assertEqual((self.root / "README.md").read_bytes(), before)
+
+
+class SocDocumentationContractTest(unittest.TestCase):
+    def read(self, relative: str) -> str:
+        return (ROOT / relative).read_text(encoding="utf-8")
+
+    def test_readme_links_the_soc_guide_and_labels_the_recording(self) -> None:
+        source = self.read("README.md")
+        self.assertIn("[Board-ready SoC](docs/soc.md)", source)
+        self.assertIn("![Actual post-route physical placement]", source)
+        self.assertIn("docs/images/soc-floorplan.svg", source)
+        self.assertIn("actual Vivado post-route primitive locations", source)
+        self.assertIn("![Native Vivado implemented-device view", source)
+        self.assertIn("docs/images/soc-vivado-device.png", source)
+        self.assertIn("docs/images/soc-vivado-device.json", source)
+        self.assertIn("not proof of operation on a physical board", source)
+        self.assertIn("not a conceptual CPU illustration", source)
+        self.assertIn("verification workflow", source)
+        self.assertIn("not FPGA board footage", source)
+        self.assertIn("make soc-check", source)
+        self.assertIn("make soc-bitstream", source)
+
+    def test_soc_guide_records_the_complete_board_contract(self) -> None:
+        source = self.read("docs/soc.md")
+        required = (
+            "0x0000_0000–0x0000_7FFF",
+            "0x1000_0000–0x1000_000F",
+            "0x1000_1000–0x1000_101F",
+            "0x2000_0000–0x2000_7FFF",
+            "TXDATA",
+            "STATUS",
+            "IRQ_PENDING",
+            "IRQ_ENABLE",
+            "115200 8-N-1",
+            "BTN0",
+            "BTN1",
+            "make soc-check",
+            "make soc-bitstream",
+            "make soc-floorplan",
+            "make soc-post-route-sim",
+            "make soc-program",
+            "not architectural access-fault traps",
+            "transmit-only",
+            "no bootloader",
+            "no external memory",
+            "no PLIC",
+            "no operating system",
+            "Physical-board evidence: not published",
+        )
+        for text in required:
+            with self.subTest(text=text):
+                self.assertIn(text, source)
+
+    def test_architecture_names_every_integration_boundary(self) -> None:
+        source = self.read("docs/architecture.md")
+        for name in ("`cpu`", "`rv32i_core`", "`rv32i_soc`", "`arty_a7_35t_top`"):
+            with self.subTest(name=name):
+                self.assertIn(name, source)
+
+    def test_verification_names_soc_units_and_complete_uart_output(self) -> None:
+        source = self.read("docs/verification.md")
+        for name in (
+            "core_external",
+            "csr_external_irq",
+            "wb_master_adapter",
+            "wb_arbiter",
+            "wb_interconnect",
+            "wb_memory",
+            "uart_tx",
+            "wb_uart",
+            "button_debounce",
+            "wb_gpio_irq",
+            "reset_controller",
+            "soc_smoke",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, source)
+        self.assertIn("rv32i soc ready\\nexternal irq\\nexternal irq\\n", source)
+
+    def test_unpublished_board_state_and_coverage_scope_are_explicit(self) -> None:
+        evidence = self.read("docs/evidence.md")
+        coverage = self.read("docs/coverage.md")
+        self.assertIn("Physical-board evidence: not published", evidence)
+        self.assertNotIn("Physical-board evidence: published and validated", evidence)
+        self.assertIn(
+            "SoC unit and integration checks are not part of this core coverage database",
+            coverage,
+        )
 
 
 if __name__ == "__main__":

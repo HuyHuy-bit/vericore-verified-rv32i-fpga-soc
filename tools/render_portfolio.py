@@ -9,16 +9,20 @@ import sys
 import tempfile
 
 if __package__:
-    from .results import ResultSet, load_result_set, validate_result_set
+    from .results import (
+        ResultSet, evidence_state, load_json, load_result_set, validate_result_set,
+    )
 else:
-    from results import ResultSet, load_result_set, validate_result_set
+    from results import (
+        ResultSet, evidence_state, load_json, load_result_set, validate_result_set,
+    )
 
 
 DOCUMENT_BLOCKS = {
-    "README.md": ("facts", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
-    "docs/evidence.md": ("overview", "facts", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
-    "docs/architecture.md": ("facts", "benchmarks", "synthesis"),
-    "docs/verification.md": ("facts", "summary"),
+    "README.md": ("facts", "status", "soc", "snapshot", "verification", "benchmarks", "synthesis", "provenance"),
+    "docs/evidence.md": ("overview", "facts", "status", "soc", "verification", "benchmarks", "synthesis", "synthesis-hashes", "provenance"),
+    "docs/architecture.md": ("facts", "status", "benchmarks", "synthesis"),
+    "docs/verification.md": ("facts", "status", "summary"),
 }
 MARKER_RE = re.compile(r"<!-- portfolio:([a-z][a-z0-9-]*):(start|end) -->")
 
@@ -46,6 +50,23 @@ def replace_block(source: str, name: str, contents: str) -> str:
 
 def percentage(numerator: int, denominator: int) -> str:
     return "n/a" if denominator == 0 else f"{100.0 * numerator / denominator:.1f}%"
+
+
+def soc_status(result_root: Path) -> str:
+    path = result_root / "soc.json"
+    if not path.exists():
+        return "Physical-board evidence: not published"
+    value = load_json(path)
+    route = value["route"]
+    return "\n".join((
+        "Physical-board evidence: published and validated",
+        "",
+        "| Board | Part | LUT | FF | BRAM tiles | WNS (ns) | fmax (MHz) |",
+        "|---|---|---:|---:|---:|---:|---:|",
+        f"| {value['board']} | `{value['part']}` | {route['lut']:,} | "
+        f"{route['ff']:,} | {route['bram_tiles']} | {route['wns_ns']} | "
+        f"{route['fmax_mhz']} |",
+    ))
 
 
 def benchmark_table(result: ResultSet) -> str:
@@ -120,7 +141,7 @@ def verification_table(result: ResultSet) -> str:
     ))
 
 
-def facts(result: ResultSet) -> str:
+def facts(result: ResultSet, state: str) -> str:
     value = result.verification
     assertions = value["assertions"]["concurrent"] + value["assertions"]["immediate"]
     matrix = ",".join(item["name"] for item in value["memory_configurations"])
@@ -133,7 +154,8 @@ def facts(result: ResultSet) -> str:
         f"EVIDENCE_FACT SOURCE_COVER_POINTS={value['cover_points']['source']}",
         f"EVIDENCE_FACT TRACKED_COVERAGE_HIT={value['cover_points']['hit']}",
         f"EVIDENCE_FACT TRACKED_COVERAGE_TOTAL={value['cover_points']['source']}",
-        "EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current",
+        f"EVIDENCE_FACT TRACKED_COVERAGE_STATUS={state}",
+        f"EVIDENCE_FACT EVIDENCE_STATUS={state}",
         f"EVIDENCE_FACT CI_CONFIGS={len(value['memory_configurations'])}",
         f"EVIDENCE_FACT CI_MATRIX={matrix}",
         f"EVIDENCE_FACT ARCH_TEST_SHA={result.tool_versions['architecture_test_commit']}",
@@ -142,6 +164,15 @@ def facts(result: ResultSet) -> str:
         f"EVIDENCE_FACT SPIKE_RANDOM_SEEDS={value['spike_random']['requested']}",
     ))
     return f"<!-- evidence-facts:begin -->\n{rows}\n<!-- evidence-facts:end -->"
+
+
+def evidence_notice(result: ResultSet, state: str) -> str:
+    if state == "current":
+        return "Current measurements — validated for the checked-out RTL."
+    return (
+        "Historical measurements — validated for RTL "
+        f"{result.manifest['rtl_commit']}; current RTL changes are not yet remeasured."
+    )
 
 
 def provenance(result: ResultSet) -> str:
@@ -221,7 +252,7 @@ def summary(result: ResultSet) -> str:
     )
 
 
-def block_contents(result: ResultSet) -> dict[str, str]:
+def block_contents(result: ResultSet, state: str) -> dict[str, str]:
     return {
         "overview": evidence_overview(result),
         "snapshot": snapshot(result),
@@ -229,15 +260,18 @@ def block_contents(result: ResultSet) -> dict[str, str]:
         "benchmarks": benchmark_table(result),
         "synthesis": synthesis_table(result),
         "synthesis-hashes": synthesis_hashes(result),
-        "facts": facts(result),
+        "facts": facts(result, state),
+        "status": evidence_notice(result, state),
         "provenance": provenance(result),
         "summary": summary(result),
+        "soc": soc_status(result.root),
     }
 
 
 def render_documents(root: Path, result_set: ResultSet) -> dict[Path, str]:
     root = root.resolve()
-    contents = block_contents(result_set)
+    state = evidence_state(root, result_set.manifest["rtl_commit"])
+    contents = block_contents(result_set, state)
     rendered: dict[Path, str] = {}
     for relative, names in DOCUMENT_BLOCKS.items():
         path = root / relative
@@ -254,6 +288,17 @@ def render_documents(root: Path, result_set: ResultSet) -> dict[Path, str]:
         for name in names:
             source = replace_block(source, name, contents[name])
         rendered[path] = source
+    coverage = root / "docs/coverage.md"
+    try:
+        coverage_source = coverage.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise RenderError("missing portfolio document: docs/coverage.md") from exc
+    status_pattern = re.compile(r"\*\*Evidence status: (?:historical|current)\.\*\*")
+    if len(status_pattern.findall(coverage_source)) != 1:
+        raise RenderError("docs/coverage.md: expected one evidence status")
+    rendered[coverage] = status_pattern.sub(
+        f"**Evidence status: {state}.**", coverage_source
+    )
     return rendered
 
 

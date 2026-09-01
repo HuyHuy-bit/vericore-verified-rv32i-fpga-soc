@@ -8,6 +8,7 @@ import subprocess
 import unittest
 from unittest import mock
 
+from tools import portfolio_demo
 from tools.portfolio_demo import (
     DemoError,
     demo_steps,
@@ -81,18 +82,38 @@ class PortfolioDemoTest(unittest.TestCase):
         with self.assertRaisesRegex(DemoError, "result records"):
             run_demo(self.root, StringIO(), live=False)
 
-    def test_make_exposes_live_record_and_container_targets(self) -> None:
+    def test_make_runs_verification_before_recording_in_container(self) -> None:
         result = subprocess.run(
-            ["make", "--no-print-directory", "-n", "portfolio-gif"],
+            ["make", "--no-print-directory", "-n", "portfolio-demo-record"],
             cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("portfolio-demo-record", result.stdout)
-        self.assertIn("--target demo", result.stdout)
+        self.assertIn("tools/verification.py run --profile fast", result.stdout)
+        self.assertIn("make --no-print-directory lockstep-sample", result.stdout)
+        fast = result.stdout.index("tools/verification.py run --profile fast")
+        lockstep = result.stdout.index("make --no-print-directory lockstep-sample")
+        record = result.stdout.index("vhs docs/media/portfolio-demo.tape")
+        self.assertLess(fast, lockstep)
+        self.assertLess(lockstep, record)
 
-    def test_tape_holds_the_result_for_portfolio_length(self) -> None:
+    def test_replay_is_bounded_and_marks_completion(self) -> None:
+        self.assertTrue(hasattr(portfolio_demo, "replay_demo"), "bounded replay is missing")
+        delays: list[float] = []
+        output = StringIO()
+        with mock.patch("tools.portfolio_demo.load_validated", return_value=self.result):
+            status = portfolio_demo.replay_demo(
+                self.root, output, delay=3.0, sleeper=delays.append
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(delays, [3.0] * 10)
+        self.assertIn("VERIFICATION GATES PASSED", output.getvalue())
+        self.assertTrue(output.getvalue().rstrip().endswith("DEMO COMPLETE"))
+
+    def test_tape_uses_bounded_replay_for_portfolio_length(self) -> None:
         source = (ROOT / "docs/media/portfolio-demo.tape").read_text(encoding="utf-8")
-        self.assertIn("Sleep 30s", source)
+        self.assertIn('Type "python3 tools/portfolio_demo.py --replay"', source)
+        self.assertIn("Sleep 32s", source)
+        self.assertNotIn("--live", source)
 
     def write_media(self) -> None:
         (self.root / "README.md").write_text(
@@ -102,7 +123,7 @@ class PortfolioDemoTest(unittest.TestCase):
         (self.root / "docs/media/portfolio-demo.txt").write_text(summary_text(self.result), encoding="utf-8")
         (self.root / "docs/media/portfolio-demo.tape").write_text(
             "Output docs/media/portfolio-demo.gif\nSet Width 1280\nSet Height 720\n"
-            "Type \"python3 tools/portfolio_demo.py --live\"\n",
+            "Type \"python3 tools/portfolio_demo.py --replay\"\n",
             encoding="utf-8",
         )
         (self.root / "docs/media/portfolio-demo.gif").write_bytes(animated_gif())

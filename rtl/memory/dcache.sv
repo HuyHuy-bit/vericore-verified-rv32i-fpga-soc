@@ -31,6 +31,7 @@ module dcache #(
 
     // CPU side
     input  var logic        req,          // a load or store is presented
+    input  var logic        cacheable,
     input  var logic        advance,
     input  var logic [XLEN-1:0] addr,
     input  var logic [XBYTES-1:0] byte_en,      // nonzero => store
@@ -113,15 +114,54 @@ module dcache #(
         end
     end
 
-    logic            is_store, line_present, wt_store;
+    logic            is_store, line_present, wt_store, bypass, direct_request;
+    logic            flush_start, flush_complete;
+    logic [1:0]      state;
+    logic direct_active;
+    logic direct_done;
     assign is_store     = |byte_en;
     assign line_present = |way_hit;
     // A write-through store always goes to memory, resident or not.
     assign wt_store     = (WRITE_BACK == 0) && is_store;
+    assign flush_start  = (state == S_IDLE) && flush_req && !flush_complete
+                          && !direct_active && !direct_done;
+    assign bypass       = (state == S_IDLE) && req && !cacheable && !flush_start;
+    assign direct_request = bypass || ((state == S_IDLE) && !flush_start
+                            && req && cacheable && wt_store);
 
-    logic [1:0]      state;
     logic [OFFW-1:0] fill_word, wb_word;
     logic [WAYW-1:0] fill_way;
+    logic [XLEN-1:0] direct_read_word;
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            direct_active <= 1'b0;
+            direct_done <= 1'b0;
+            direct_read_word <= '0;
+        end else if (direct_done) begin
+            if (!req || advance)
+                direct_done <= 1'b0;
+        end else if (direct_active) begin
+            if (!req) begin
+                direct_active <= 1'b0;
+            end else if (mem_ready) begin
+                direct_active <= 1'b0;
+                if (!advance) begin
+                    direct_done <= 1'b1;
+                    direct_read_word <= mem_read_word;
+                end
+            end
+        end else if (direct_request) begin
+            if (mem_ready) begin
+                if (!advance) begin
+                    direct_done <= 1'b1;
+                    direct_read_word <= mem_read_word;
+                end
+            end else begin
+                direct_active <= 1'b1;
+            end
+        end
+    end
 
     // The victim being written back. Held separately from idx/fill_way because
     // a flush walks lines unrelated to whatever address is on the CPU port.
@@ -130,7 +170,6 @@ module dcache #(
     logic            flushing;      // this writeback belongs to a flush walk
     logic [FSW-1:0]  flush_set;
     logic [WAYW-1:0] flush_way;
-    logic            flush_complete;
 
     assign flush_done = flush_complete;
 
@@ -165,7 +204,8 @@ module dcache #(
     // write-through merge and the write-back-mode store-hit update, since
     // both write hit_way/idx/off with byte_en/write_word.
     logic wr_en;
-    assign wr_en = (state == S_IDLE) && req && line_present &&
+    assign wr_en = (state == S_IDLE) && !flush_start
+                   && req && cacheable && line_present &&
                    ((wt_store && mem_ready) || (!wt_store && is_store));
 
     // A refill word landing this cycle, and which way it targets.
@@ -250,7 +290,8 @@ module dcache #(
     logic        load_hit_now, prev_load_hit;
     logic [XLEN-1:0] prev_addr;
     logic        load_hit_wait;
-    assign load_hit_now = (state == S_IDLE) && req && !wt_store && !is_store && line_present;
+    assign load_hit_now = (state == S_IDLE) && !flush_start && req && cacheable
+                          && !wt_store && !is_store && line_present;
     always_ff @(posedge clk) begin
         if (rst) begin
             prev_load_hit <= 1'b0;
@@ -262,15 +303,17 @@ module dcache #(
     end
     assign load_hit_wait = prev_load_hit && load_hit_now && (addr == prev_addr);
 
-    assign read_word = rd_muxed;
-    assign access     = req;
+    assign read_word = bypass ? (direct_done ? direct_read_word : mem_read_word)
+                              : rd_muxed;
+    assign access     = req && cacheable && !flush_start;
 
     // One pulse per access that finds its line absent. A write-through store
     // that misses sits in S_IDLE for its whole memory access without ever
     // refilling, so a bare level would count it once per stalled cycle; the
     // `counted` one-shot pins it to the first.
     logic counted;
-    assign miss_pulse = req && !line_present && (state == S_IDLE) && !counted;
+    assign miss_pulse = req && cacheable && !flush_start && !line_present
+                        && (state == S_IDLE) && !counted;
 
     always_ff @(posedge clk) begin
         if (rst)                       counted <= 1'b0;
@@ -282,9 +325,10 @@ module dcache #(
     // State first: a flush runs with no access outstanding, and the pipeline
     // must be held for its duration rather than told the port is free.
     always_comb begin
-        if (state != S_IDLE) ready = 1'b0;
+        if (state != S_IDLE || flush_start) ready = 1'b0;
         else if (!req)       ready = 1'b1;
-        else if (wt_store)   ready = mem_ready;      // always pays memory
+        else if (!cacheable) ready = direct_done || mem_ready;
+        else if (wt_store)   ready = direct_done || mem_ready;
         else if (is_store)   ready = line_present;   // store-hit: no read-port wait
         else                 ready = load_hit_wait;  // load-hit: registered read latency
     end
@@ -314,7 +358,7 @@ module dcache #(
                           + ({{(32-OFFW){1'b0}}, fill_word} << 2);
             end
             default: begin
-                if (req && wt_store) begin
+                if (direct_request && !direct_done) begin
                     mem_req        = 1'b1;
                     mem_byte_en    = byte_en;
                     mem_write_word = write_word;
@@ -353,11 +397,11 @@ module dcache #(
 
             case (state)
                 S_IDLE: begin
-                    if (flush_req && !flush_complete) begin
+                    if (flush_start) begin
                         flush_set <= '0;
                         flush_way <= '0;
                         state     <= S_FLUSH;
-                    end else if (req) begin
+                    end else if (req && cacheable) begin
                         if (wt_store) begin
                             // no metadata change: a resident line's dirty bit
                             // never gets set in write-through mode, and the
@@ -450,15 +494,16 @@ module dcache #(
     c_state_flush: cover property (@(posedge clk) disable iff (rst) state == S_FLUSH);
 
     c_hit_load:  cover property (@(posedge clk) disable iff (rst)
-        state == S_IDLE && req && line_present && !is_store);
+        state == S_IDLE && !flush_start && req && cacheable && line_present && !is_store);
     c_hit_store: cover property (@(posedge clk) disable iff (rst)
-        state == S_IDLE && req && line_present && is_store);
+        state == S_IDLE && !flush_start && req && cacheable && line_present && is_store);
     c_miss_load: cover property (@(posedge clk) disable iff (rst)
-        state == S_IDLE && req && !line_present && !is_store);
+        state == S_IDLE && !flush_start && req && cacheable && !line_present && !is_store);
     c_miss_store_alloc: cover property (@(posedge clk) disable iff (rst)
-        state == S_IDLE && req && !line_present && is_store && !wt_store);
+        state == S_IDLE && !flush_start && req && cacheable
+        && !line_present && is_store && !wt_store);
     c_dirty_evict: cover property (@(posedge clk) disable iff (rst)
-        state == S_IDLE && req && !line_present
+        state == S_IDLE && !flush_start && req && cacheable && !line_present
         && (WRITE_BACK != 0) && vld[victim[idx]][idx] && drty[victim[idx]][idx]);
 
     c_trans_idle_to_wb:    cover property (@(posedge clk) disable iff (rst)
@@ -477,6 +522,25 @@ module dcache #(
         state == S_FILL ##1 state == S_IDLE);
     c_trans_flush_to_idle: cover property (@(posedge clk) disable iff (rst)
         state == S_FLUSH ##1 state == S_IDLE);
+`endif
+
+`ifndef SYNTHESIS
+    a_bypass_no_cache_state: assert property (@(posedge clk) disable iff (rst)
+        bypass |-> !wr_en && !fill_en && !access && !miss_pulse);
+    a_bypass_completion: assert property (@(posedge clk) disable iff (rst)
+        bypass && !direct_done |-> ready == mem_ready);
+    a_bypass_held: assert property (@(posedge clk) disable iff (rst)
+        bypass && direct_done |-> ready && !mem_req);
+    a_flush_start_blocks_request: assert property (@(posedge clk) disable iff (rst)
+        flush_start |-> !ready && !mem_req && !wr_en && !access && !miss_pulse);
+    a_flush_walk_has_no_request: assert property (@(posedge clk) disable iff (rst)
+        state == S_FLUSH |-> !mem_req);
+    a_direct_active_request: assert property (@(posedge clk) disable iff (rst)
+        direct_active && req |-> state == S_IDLE && mem_req);
+    a_direct_held: assert property (@(posedge clk) disable iff (rst)
+        direct_done && req |-> ready && !mem_req);
+    a_flush_deferred_for_direct: assert property (@(posedge clk) disable iff (rst)
+        flush_req && (direct_active || direct_done) |-> !flush_start);
 `endif
 endmodule
 

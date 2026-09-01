@@ -16,7 +16,12 @@ import sys
 from typing import Callable, Iterable
 
 
-REFERENCE_KEYS = ("ARCH_TEST_SHA", "ARCH_TEST_EXPECTED", "SPIKE_SHA")
+REFERENCE_KEYS = (
+    "ARCH_TEST_SHA",
+    "ARCH_TEST_EXPECTED",
+    "DIGILENT_XDC_SHA",
+    "SPIKE_SHA",
+)
 FACT_KEYS = (
     "ISA",
     "DIRECTED_TESTS",
@@ -27,6 +32,7 @@ FACT_KEYS = (
     "TRACKED_COVERAGE_HIT",
     "TRACKED_COVERAGE_TOTAL",
     "TRACKED_COVERAGE_STATUS",
+    "EVIDENCE_STATUS",
     "CI_CONFIGS",
     "CI_MATRIX",
     "ARCH_TEST_SHA",
@@ -64,6 +70,7 @@ REQUIRED_PATHS = (
     "results/**",
 )
 EVIDENCE_PATHS = ("README.md", "docs/**")
+SOC_PATHS = ("firmware/**", "boards/**", "synthesis/soc/**")
 CHECKOUT_ACTION = "actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955"
 CACHE_ACTION = "actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"
 DIRECTED_MATRIX = (
@@ -434,7 +441,26 @@ def parse_reference_versions(root: Path) -> dict[str, str]:
         raise ContractError("ARCH_TEST_EXPECTED must be a canonical positive integer")
     if not SHA_RE.fullmatch(values["SPIKE_SHA"]):
         raise ContractError("SPIKE_SHA must be a lowercase 40-hex SHA")
+    if not SHA_RE.fullmatch(values["DIGILENT_XDC_SHA"]):
+        raise ContractError("DIGILENT_XDC_SHA must be a lowercase 40-hex SHA")
     return values
+
+
+def check_digilent_xdc(root: Path, versions: dict[str, str]) -> None:
+    path = root / "boards/arty_a7_35t.xdc"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ContractError(f"missing board constraints: {path}") from exc
+    pins = re.findall(
+        r"https://github\.com/Digilent/digilent-xdc/blob/"
+        r"([0-9a-f]{40})/Arty-A7-35-Master\.xdc",
+        source,
+    )
+    if len(pins) != 1:
+        raise ContractError("board constraints must name one official Digilent source SHA")
+    if pins[0] != versions["DIGILENT_XDC_SHA"]:
+        raise ContractError("Digilent XDC source SHA does not match metadata")
 
 
 def executable_sources(root: Path) -> Iterable[Path]:
@@ -486,7 +512,11 @@ def alternate_count_name(name: str) -> bool:
 
 
 def check_symbolic_consumers(root: Path, versions: dict[str, str]) -> None:
-    literal_pins = (versions["ARCH_TEST_SHA"], versions["SPIKE_SHA"])
+    literal_pins = (
+        versions["ARCH_TEST_SHA"],
+        versions["DIGILENT_XDC_SHA"],
+        versions["SPIKE_SHA"],
+    )
     for path in executable_sources(root):
         source = path.read_text(encoding="utf-8", errors="replace")
         code = normalized_literal_code(source)
@@ -592,6 +622,7 @@ def check_triggers(path: Path, lines: list[YamlLine]) -> None:
     required = set(REQUIRED_PATHS) | {f".github/workflows/{path.name}"}
     if path.name == "rtl-tests.yml":
         required.update(EVIDENCE_PATHS)
+        required.update(SOC_PATHS)
     for event in ("push", "pull_request"):
         actual = event_paths(lines, path, event)
         for value in sorted(required):
@@ -916,6 +947,7 @@ def check_container_workflows(
             "python3 tools/verification.py container --profile fast",
             "python3 tools/verification.py container --profile directed-memory",
             "python3 tools/verification.py container --profile directed-predictor",
+            "python3 tools/verification.py container --profile soc",
             "python3 tools/verification.py container --profile portfolio",
         ),
         False,
@@ -1072,6 +1104,7 @@ def check_workflows(root: Path) -> None:
 
 def check_contracts(root: Path) -> None:
     versions = parse_reference_versions(root)
+    check_digilent_xdc(root, versions)
     check_symbolic_consumers(root, versions)
     check_workflows(root)
 
@@ -1130,7 +1163,9 @@ def check_build_surface(root: Path) -> None:
     ):
         raise ContractError("evidence-check target must run its tests and checker")
     check_dependencies, check_recipes = make_target(root, "check")
-    if check_dependencies != ("unit", "harness-test", "lint", "evidence-check") or check_recipes:
+    if check_dependencies != (
+        "unit", "harness-test", "soc-unit", "soc-sim", "lint", "evidence-check"
+    ) or check_recipes:
         raise ContractError("check target must depend on exact fast gates")
 
 
@@ -1274,15 +1309,51 @@ def check_published_portfolio(
             raise ContractError(errors[0])
 
 
+def published_evidence(
+    root: Path,
+    current_counts: tuple[int, int, int],
+) -> tuple[str, tuple[int, int, int], str | None]:
+    result_root = root / "results"
+    present = {name for name in RESULT_RECORDS if (result_root / name).is_file()}
+    if present != set(RESULT_RECORDS):
+        return "current", current_counts, None
+    try:
+        if __package__:
+            from .results import (
+                evidence_state,
+                load_result_set,
+                result_source_counts,
+            )
+        else:
+            from results import evidence_state, load_result_set, result_source_counts
+        result = load_result_set(result_root)
+        commit = result.manifest["rtl_commit"]
+        state = evidence_state(root, commit)
+        if state == "historical":
+            _, concurrent, immediate, covers = result_source_counts(result, root)
+            return state, (concurrent, immediate, covers), commit
+        return state, current_counts, commit
+    except (KeyError, OSError, ValueError) as exc:
+        raise ContractError(f"cannot derive published evidence state: {exc}") from exc
+
+
 def check_repository_evidence(root: Path) -> None:
     versions = parse_reference_versions(root)
     check_build_surface(root)
     tests = check_directed_inventory(root)
     concurrent, immediate, covers = rtl_property_counts(root)
+    evidence_status, source_counts, measured_rtl = published_evidence(
+        root, (concurrent, immediate, covers)
+    )
+    concurrent, immediate, covers = source_counts
     hit, coverage_total, coverage_status = coverage_facts(root)
-    if coverage_status == "current" and coverage_total != covers:
+    if coverage_status != evidence_status:
         raise ContractError(
-            f"current coverage total {coverage_total} does not match source cover count {covers}"
+            f"coverage status {coverage_status} does not match evidence state {evidence_status}"
+        )
+    if coverage_total != covers:
+        raise ContractError(
+            f"{evidence_status} coverage total {coverage_total} does not match source cover count {covers}"
         )
 
     rtl_path = root / ".github/workflows/rtl-tests.yml"
@@ -1301,6 +1372,7 @@ def check_repository_evidence(root: Path) -> None:
         "TRACKED_COVERAGE_HIT": str(hit),
         "TRACKED_COVERAGE_TOTAL": str(coverage_total),
         "TRACKED_COVERAGE_STATUS": coverage_status,
+        "EVIDENCE_STATUS": evidence_status,
         "CI_CONFIGS": str(len(matrix)),
         "CI_MATRIX": ",".join(name for name, _ in matrix),
         "ARCH_TEST_SHA": versions["ARCH_TEST_SHA"],
@@ -1309,6 +1381,14 @@ def check_repository_evidence(root: Path) -> None:
         "SPIKE_RANDOM_SEEDS": str(workflow_seed(root)),
     }
     documents = {relative: document_facts(root, relative) for relative in FACT_DOCUMENTS}
+    if evidence_status == "historical":
+        notice = (
+            "Historical measurements — validated for RTL "
+            f"{measured_rtl}; current RTL changes are not yet remeasured."
+        )
+        for relative in FACT_DOCUMENTS:
+            if (root / relative).read_text(encoding="utf-8").count(notice) != 1:
+                raise ContractError(f"{relative}: missing historical measurement notice")
     for key in FACT_KEYS:
         values = {relative: facts[key] for relative, facts in documents.items()}
         if len(set(values.values())) != 1:

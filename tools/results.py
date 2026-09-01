@@ -9,13 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Literal
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
@@ -143,6 +144,30 @@ MANIFEST_FIELDS = {
     "files",
     "sha256",
     "expected",
+}
+
+SOC_FIELDS = {
+    "schema", "measured_at", "tooling_commit", "rtl_commit", "board", "part",
+    "digilent_xdc_sha", "firmware_sha256", "bitstream_sha256", "vivado",
+    "route", "verification", "uart", "manual_observations",
+}
+SOC_FIRMWARE_FIELDS = {"elf", "imem", "dmem"}
+SOC_VIVADO_FIELDS = {"version", "build", "platform"}
+SOC_ROUTE_FIELDS = {
+    "input_clock_period_ns", "soc_clock_period_ns", "wns_ns",
+    "critical_path_ns", "fmax_mhz", "lut", "ff", "bram_tiles",
+    "timing_sha256", "utilization_sha256", "drc_sha256",
+}
+SOC_VERIFICATION_FIELDS = {
+    "full_status", "soc_status", "full_receipt_sha256", "soc_receipt_sha256",
+}
+SOC_UART_FIELDS = {"transcript_sha256", "lines"}
+SOC_OBSERVATION_FIELDS = {
+    "reset_banner", "button_presses", "led_transitions", "release_transitions",
+}
+SOC_RECEIPT_FIELDS = {
+    "schema", "measured_at", "profile", "status", "tooling_commit",
+    "rtl_commit", "commands",
 }
 
 MEMORY_CONFIGURATIONS = ("baseline", "slow-mem", "icache-only", "wt", "wb", "assoc")
@@ -329,7 +354,12 @@ def load_env(path: Path, errors: list[str]) -> dict[str, str]:
     return values
 
 
-def validate_manifest(result: ResultSet, errors: list[str], architecture_expected: int) -> None:
+def validate_manifest(
+    result: ResultSet,
+    errors: list[str],
+    architecture_expected: int,
+    cover_expected: int,
+) -> None:
     value = result.manifest
     if not exact_fields(value, MANIFEST_FIELDS, "manifest", errors):
         return
@@ -373,7 +403,7 @@ def validate_manifest(result: ResultSet, errors: list[str], architecture_expecte
             "architecture_tests": architecture_expected,
             "architecture_lockstep": architecture_expected,
             "spike_random": 200,
-            "cover_points": 44,
+            "cover_points": cover_expected,
         }
         for key, expected_value in wanted.items():
             if value["expected"][key] != expected_value:
@@ -385,6 +415,9 @@ def validate_verification(
     errors: list[str],
     architecture_expected: int,
     harness_expected: int,
+    concurrent_expected: int,
+    immediate_expected: int,
+    cover_expected: int,
 ) -> None:
     value = result.verification
     if not exact_fields(value, VERIFICATION_FIELDS, "verification", errors):
@@ -404,14 +437,18 @@ def validate_verification(
             errors.append(f"verification {key} must be {expected}")
     if value["harness_tests"] != harness_expected:
         errors.append(
-            f"verification harness test count must match current source ({harness_expected})"
+            f"verification harness test count must match recorded source ({harness_expected})"
         )
     if exact_fields(value["assertions"], {"concurrent", "immediate"}, "assertions", errors):
-        if value["assertions"] != {"concurrent": 25, "immediate": 2}:
-            errors.append("assertion counts must be 25 concurrent and 2 immediate")
+        expected = {
+            "concurrent": concurrent_expected,
+            "immediate": immediate_expected,
+        }
+        if value["assertions"] != expected:
+            errors.append("assertion counts must match recorded RTL source")
     if exact_fields(value["cover_points"], {"source", "hit"}, "cover_points", errors):
-        if value["cover_points"] != {"source": 44, "hit": 44}:
-            errors.append("cover-point counts must be 44/44")
+        if value["cover_points"] != {"source": cover_expected, "hit": cover_expected}:
+            errors.append("cover-point counts must match recorded RTL source")
     validate_configurations(
         value["memory_configurations"], MEMORY_CONFIGURATIONS, "memory", errors
     )
@@ -441,8 +478,8 @@ def validate_verification(
                 total = require_uint(group["total"], f"coverage {name} total", errors)
                 if hit is not None and total is not None and hit > total:
                     errors.append(f"coverage {name} hit exceeds total")
-        if value["coverage"]["user"] != {"hit": 44, "total": 44}:
-            errors.append("user coverage must be 44/44")
+        if value["coverage"]["user"] != {"hit": cover_expected, "total": cover_expected}:
+            errors.append("user coverage must match recorded RTL source")
     command_names = {
         "fast", "directed", "predictor", "python_random", "architecture_tests",
         "architecture_lockstep", "spike_random", "coverage",
@@ -650,14 +687,190 @@ def validate_provenance(result: ResultSet, checkout: Path, errors: list[str]) ->
             )
             if probe.returncode != 0:
                 errors.append(f"{label} commit does not exist in this checkout")
-        if isinstance(rtl, str) and SHA_RE.fullmatch(rtl):
-            paths = [path for path in ("rtl", "sim/cpu_tb.cpp") if (checkout / path).exists()]
-            if paths:
-                diff = subprocess.run(
-                    ["git", "-C", str(checkout), "diff", "--quiet", rtl, "--", *paths]
-                )
-                if diff.returncode != 0:
-                    errors.append("tracked RTL differs from the frozen RTL commit")
+
+
+def validate_soc_fields(
+    value: dict[str, Any], checkout: Path, errors: list[str]
+) -> None:
+    if value["schema"] != 1:
+        errors.append("SoC result schema must be 1")
+    require_timestamp(value["measured_at"], "SoC measured_at", errors)
+    tooling = require_sha(value["tooling_commit"], "SoC tooling commit", errors)
+    rtl = require_sha(value["rtl_commit"], "SoC RTL commit", errors)
+    if value["board"] != "arty-a7-35t":
+        errors.append("SoC board must be arty-a7-35t")
+    if value["part"] != "xc7a35ticsg324-1L":
+        errors.append("SoC part must be xc7a35ticsg324-1L")
+
+    metadata_errors: list[str] = []
+    references = load_env(checkout / "tools/reference_versions.env", metadata_errors)
+    errors.extend(metadata_errors)
+    digilent = require_sha(value["digilent_xdc_sha"], "SoC Digilent XDC SHA", errors)
+    if digilent is not None and digilent != references.get("DIGILENT_XDC_SHA"):
+        errors.append("SoC Digilent XDC SHA does not match pinned metadata")
+
+    if exact_fields(
+        value["firmware_sha256"], SOC_FIRMWARE_FIELDS, "SoC firmware hashes", errors
+    ):
+        for name in sorted(SOC_FIRMWARE_FIELDS):
+            require_hash(
+                value["firmware_sha256"][name], f"SoC firmware {name}", errors
+            )
+    require_hash(value["bitstream_sha256"], "SoC bitstream", errors)
+
+    if exact_fields(value["vivado"], SOC_VIVADO_FIELDS, "SoC Vivado", errors):
+        if value["vivado"]["version"] != "2025.2":
+            errors.append("SoC Vivado version must be 2025.2")
+        if not isinstance(value["vivado"]["build"], str) or not UINT_RE.fullmatch(
+            value["vivado"]["build"]
+        ):
+            errors.append("SoC Vivado build must be a canonical integer string")
+        if value["vivado"]["platform"] not in {"native", "wsl-windows"}:
+            errors.append("SoC Vivado platform is unsupported")
+
+    if exact_fields(value["route"], SOC_ROUTE_FIELDS, "SoC route", errors):
+        input_period = require_decimal(
+            value["route"]["input_clock_period_ns"],
+            "SoC route input clock period", errors
+        )
+        soc_period = require_decimal(
+            value["route"]["soc_clock_period_ns"],
+            "SoC route SoC clock period", errors
+        )
+        wns = require_decimal(value["route"]["wns_ns"], "SoC route WNS", errors)
+        critical = require_decimal(
+            value["route"]["critical_path_ns"], "SoC route critical path", errors
+        )
+        fmax = require_decimal(value["route"]["fmax_mhz"], "SoC route fmax", errors)
+        if input_period is not None and abs(input_period - 10.0) > 0.0001:
+            errors.append("SoC route input clock period must be 10.000 ns")
+        if soc_period is not None and abs(soc_period - 20.0) > 0.0001:
+            errors.append("SoC route SoC clock period must be 20.000 ns")
+        if wns is not None and wns < 0.0:
+            errors.append("SoC route WNS must be nonnegative")
+        if critical is not None and critical <= 0.0:
+            errors.append("SoC route critical path must be positive")
+        if None not in (soc_period, wns, critical) and abs(
+            critical - (soc_period - wns)
+        ) > 0.001:
+            errors.append("SoC route critical path does not match period minus WNS")
+        if critical is not None and critical > 0.0 and fmax is not None:
+            if abs(fmax - 1000.0 / critical) > 0.001:
+                errors.append("SoC route fmax does not match the critical path")
+        require_uint(value["route"]["lut"], "SoC route LUT", errors)
+        require_uint(value["route"]["ff"], "SoC route FF", errors)
+        bram = require_decimal(value["route"]["bram_tiles"], "SoC route BRAM", errors)
+        if bram is not None and bram < 0.0:
+            errors.append("SoC route BRAM must be nonnegative")
+        for name in ("timing_sha256", "utilization_sha256", "drc_sha256"):
+            require_hash(value["route"][name], f"SoC route {name}", errors)
+
+    if exact_fields(
+        value["verification"], SOC_VERIFICATION_FIELDS, "SoC verification", errors
+    ):
+        if value["verification"]["full_status"] != "complete":
+            errors.append("SoC full verification must be complete")
+        if value["verification"]["soc_status"] != "complete":
+            errors.append("SoC integration verification must be complete")
+        require_hash(
+            value["verification"]["full_receipt_sha256"],
+            "SoC full verification receipt",
+            errors,
+        )
+        require_hash(
+            value["verification"]["soc_receipt_sha256"],
+            "SoC integration verification receipt",
+            errors,
+        )
+
+    if exact_fields(value["uart"], SOC_UART_FIELDS, "SoC UART", errors):
+        require_hash(value["uart"]["transcript_sha256"], "SoC UART transcript", errors)
+        if value["uart"]["lines"] != [
+            "rv32i soc ready", "external irq", "external irq"
+        ]:
+            errors.append("SoC UART lines must contain the complete demo transcript")
+
+    if exact_fields(
+        value["manual_observations"],
+        SOC_OBSERVATION_FIELDS,
+        "SoC manual observations",
+        errors,
+    ):
+        observations = value["manual_observations"]
+        if observations["reset_banner"] is not True:
+            errors.append("SoC reset banner must be observed")
+        counts = {
+            "button_presses": 2,
+            "led_transitions": 2,
+            "release_transitions": 0,
+        }
+        for name, expected in counts.items():
+            count = require_uint(observations[name], f"SoC {name}", errors)
+            if count is not None and count != expected:
+                errors.append(f"SoC {name.replace('_', ' ')} must be {expected}")
+
+    if (checkout / ".git").exists() and tooling is not None and rtl is not None:
+        existing: dict[str, bool] = {}
+        for label, commit in (("tooling", tooling), ("RTL", rtl)):
+            probe = subprocess.run(
+                ["git", "-C", str(checkout), "cat-file", "-e", f"{commit}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            existing[label] = probe.returncode == 0
+            if not existing[label]:
+                errors.append(f"SoC {label} commit does not exist in this checkout")
+        if all(existing.values()):
+            ancestor = subprocess.run(
+                ["git", "-C", str(checkout), "merge-base", "--is-ancestor", rtl, tooling]
+            )
+            if ancestor.returncode != 0:
+                errors.append("SoC RTL commit must be an ancestor of tooling commit")
+            rtl_diff = subprocess.run(
+                ["git", "-C", str(checkout), "diff", "--quiet", rtl, tooling, "--", "rtl"]
+            )
+            if rtl_diff.returncode != 0:
+                errors.append("SoC RTL differs between the recorded commits")
+
+
+def validate_soc_result(root: Path, checkout: Path) -> list[str]:
+    path = root / "soc.json"
+    if not path.exists():
+        return []
+    value = load_json(path)
+    errors: list[str] = []
+    if exact_fields(value, SOC_FIELDS, "SoC result", errors):
+        validate_soc_fields(value, checkout.resolve(), errors)
+    return errors
+
+
+def result_source_counts(
+    result: ResultSet,
+    checkout: Path,
+) -> tuple[int, int, int, int]:
+    rtl_commit = result.manifest.get("rtl_commit")
+    tooling_commit = result.manifest.get("tooling_commit")
+    if not isinstance(rtl_commit, str) or SHA_RE.fullmatch(rtl_commit) is None:
+        raise ResultError("manifest RTL commit is invalid")
+    if not isinstance(tooling_commit, str) or SHA_RE.fullmatch(tooling_commit) is None:
+        raise ResultError("manifest tooling commit is invalid")
+    if evidence_state(checkout, rtl_commit) == "historical":
+        harness = harness_test_count_text(
+            git_blob(checkout, tooling_commit, "tools/test_harness.py"),
+            f"{tooling_commit}:tools/test_harness.py",
+        )
+        paths = tuple(
+            path for path in git_paths(checkout, rtl_commit, "rtl")
+            if path.endswith(".sv")
+        )
+        if not paths:
+            raise ResultError("recorded RTL commit contains no SystemVerilog sources")
+        source = "\n".join(git_blob(checkout, rtl_commit, path) for path in paths)
+        concurrent, immediate, covers = sv_property_counts(source)
+        return harness, concurrent, immediate, covers
+    harness = harness_test_count(checkout / "tools/test_harness.py")
+    concurrent, immediate, covers = checkout_property_counts(checkout)
+    return harness, concurrent, immediate, covers
 
 
 def validate_result_set(root: Path, checkout: Path) -> list[str]:
@@ -672,18 +885,29 @@ def validate_result_set(root: Path, checkout: Path) -> list[str]:
     if architecture_expected <= 0:
         errors.append("ARCH_TEST_EXPECTED must be a positive canonical integer")
     try:
-        harness_expected = harness_test_count(
-            checkout.resolve() / "tools" / "test_harness.py"
-        )
-    except (OSError, SyntaxError) as exc:
-        errors.append(f"cannot derive harness test count: {exc}")
-        harness_expected = -1
-    validate_manifest(result, errors, architecture_expected)
-    validate_verification(result, errors, architecture_expected, harness_expected)
+        source_counts = result_source_counts(result, checkout.resolve())
+    except (OSError, ResultError, SyntaxError) as exc:
+        errors.append(f"cannot derive recorded source counts: {exc}")
+        source_counts = (-1, -1, -1, -1)
+    harness_expected, concurrent_expected, immediate_expected, cover_expected = source_counts
+    validate_manifest(result, errors, architecture_expected, cover_expected)
+    validate_verification(
+        result,
+        errors,
+        architecture_expected,
+        harness_expected,
+        concurrent_expected,
+        immediate_expected,
+        cover_expected,
+    )
     validate_benchmarks(result, errors)
     validate_synthesis(result, errors)
     validate_tools(result, checkout.resolve(), errors)
     validate_provenance(result, checkout.resolve(), errors)
+    try:
+        errors.extend(validate_soc_result(root, checkout.resolve()))
+    except (ResultError, OSError) as exc:
+        errors.append(str(exc))
     return errors
 
 
@@ -697,6 +921,61 @@ def git_text(root: Path, *arguments: str) -> str:
     if result.returncode != 0:
         raise ResultError(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def git_blob(checkout: Path, commit: str, relative: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(checkout), "show", f"{commit}:{relative}"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise ResultError(f"cannot read recorded source {commit}:{relative}")
+    return result.stdout
+
+
+def git_paths(checkout: Path, commit: str, prefix: str) -> tuple[str, ...]:
+    prefix = prefix.strip("/")
+    if not prefix or prefix == "." or ".." in Path(prefix).parts:
+        raise ResultError("recorded source prefix is invalid")
+    output = git_text(
+        checkout, "ls-tree", "-r", "--name-only", commit, "--", prefix
+    )
+    paths = tuple(output.splitlines()) if output else ()
+    if any(path != prefix and not path.startswith(prefix + "/") for path in paths):
+        raise ResultError("recorded source path escaped its prefix")
+    return paths
+
+
+def evidence_state(
+    checkout: Path,
+    rtl_commit: str,
+) -> Literal["current", "historical"]:
+    checkout = checkout.resolve()
+    if not (checkout / ".git").exists():
+        return "current"
+    paths = ("rtl", "sim/cpu_tb.cpp")
+    diff = subprocess.run(
+        ["git", "-C", str(checkout), "diff", "--quiet", rtl_commit, "--", *paths],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if diff.returncode not in (0, 1):
+        raise ResultError(f"cannot compare RTL with recorded commit: {diff.stderr.strip()}")
+    status = subprocess.run(
+        [
+            "git", "-C", str(checkout), "status", "--porcelain",
+            "--untracked-files=all", "--", *paths,
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if status.returncode != 0:
+        raise ResultError(f"cannot inspect RTL checkout state: {status.stderr.strip()}")
+    return "current" if diff.returncode == 0 and not status.stdout.strip() else "historical"
 
 
 def require_clean_checkout(checkout: Path, source_commit: str) -> None:
@@ -848,6 +1127,323 @@ def collect_synthesis(root: Path, report_dir: Path, output: Path) -> None:
             temporary.unlink()
 
 
+def artifact_path(value: object, checkout: Path, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ResultError(f"{label} path is invalid")
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else (checkout / path).resolve()
+
+
+def sha256_file(path: Path, label: str) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ResultError(f"cannot read {label}: {path}") from exc
+
+
+def require_artifact_hash(path: Path, expected: object, label: str) -> str:
+    if not isinstance(expected, str) or HASH_RE.fullmatch(expected) is None:
+        raise ResultError(f"{label} manifest hash is invalid")
+    actual = sha256_file(path, label)
+    if actual != expected:
+        raise ResultError(f"{label} hash mismatch")
+    return actual
+
+
+def validate_collection_receipts(
+    full: dict[str, Any],
+    soc: dict[str, Any],
+    checkout: Path,
+) -> tuple[str, str]:
+    errors: list[str] = []
+    if exact_fields(full, VERIFICATION_FIELDS, "full verification receipt", errors):
+        references = load_env(checkout / "tools/reference_versions.env", errors)
+        expected_text = references.get("ARCH_TEST_EXPECTED", "")
+        architecture_expected = int(expected_text) if UINT_RE.fullmatch(expected_text) else 0
+        harness = harness_test_count(checkout / "tools/test_harness.py")
+        concurrent, immediate, covers = checkout_property_counts(checkout)
+        receipt = ResultSet(Path(), {}, full, (), (), {})
+        validate_verification(
+            receipt,
+            errors,
+            architecture_expected,
+            harness,
+            concurrent,
+            immediate,
+            covers,
+        )
+    if exact_fields(soc, SOC_RECEIPT_FIELDS, "SoC verification receipt", errors):
+        if soc["schema"] != 1 or soc["profile"] != "soc":
+            errors.append("SoC verification receipt profile is invalid")
+        if soc["status"] != "complete":
+            errors.append("SoC verification receipt is not complete")
+        require_timestamp(soc["measured_at"], "SoC verification measured_at", errors)
+        require_sha(soc["tooling_commit"], "SoC receipt tooling commit", errors)
+        require_sha(soc["rtl_commit"], "SoC receipt RTL commit", errors)
+        if soc["commands"] != ["make soc-check"]:
+            errors.append("SoC verification receipt command is not canonical")
+    if errors:
+        raise ResultError("; ".join(errors))
+    return str(full["tooling_commit"]), str(full["rtl_commit"])
+
+
+def collect_soc(
+    board_manifest_path: Path,
+    firmware_manifest_path: Path,
+    full_receipt_path: Path,
+    soc_receipt_path: Path,
+    uart_path: Path,
+    observations_path: Path,
+    output: Path,
+) -> None:
+    inputs = tuple(
+        path.resolve()
+        for path in (
+            board_manifest_path,
+            firmware_manifest_path,
+            full_receipt_path,
+            soc_receipt_path,
+            uart_path,
+            observations_path,
+        )
+    )
+    output = output.resolve()
+    if output.name != "soc.json" or output.parent.name != "results":
+        raise ResultError("SoC result output must be results/soc.json")
+    for source in inputs:
+        if output == source or output.is_relative_to(source.parent):
+            raise ResultError("SoC result destination cannot be inside a raw input directory")
+    checkout = output.parent.parent.resolve()
+    board = load_json(inputs[0])
+    firmware = load_json(inputs[1])
+    full = load_json(inputs[2])
+    soc = load_json(inputs[3])
+    observations = load_json(inputs[5])
+
+    board_fields = {
+        "schema", "status", "measured_at", "source_commit", "rtl_commit", "part",
+        "top", "input_clock_period_ns", "soc_clock_period_ns", "wns_ns",
+        "firmware", "xdc_sha256", "vivado", "invocation", "outputs",
+    }
+    errors: list[str] = []
+    if not exact_fields(board, board_fields, "board manifest", errors):
+        raise ResultError("; ".join(errors))
+    if board["schema"] != 1 or board["status"] != "complete":
+        raise ResultError("board manifest is not complete")
+    require_timestamp(board["measured_at"], "board measured_at", errors)
+    source_commit = require_sha(board["source_commit"], "board source commit", errors)
+    rtl_commit = require_sha(board["rtl_commit"], "board RTL commit", errors)
+    if board["part"] != "xc7a35ticsg324-1L" or board["top"] != "arty_a7_35t_top":
+        errors.append("board manifest target is incorrect")
+    board_input_period = board["input_clock_period_ns"]
+    if (
+        not isinstance(board_input_period, (int, float))
+        or isinstance(board_input_period, bool)
+        or not math.isfinite(float(board_input_period))
+        or abs(float(board_input_period) - 10.0) > 0.0001
+    ):
+        errors.append("board manifest input clock period must be 10 ns")
+    board_soc_period = board["soc_clock_period_ns"]
+    if (
+        not isinstance(board_soc_period, (int, float))
+        or isinstance(board_soc_period, bool)
+        or not math.isfinite(float(board_soc_period))
+        or abs(float(board_soc_period) - 20.0) > 0.0001
+    ):
+        errors.append("board manifest SoC clock period must be 20 ns")
+    board_wns = board["wns_ns"]
+    if (
+        not isinstance(board_wns, (int, float))
+        or isinstance(board_wns, bool)
+        or not math.isfinite(float(board_wns))
+        or float(board_wns) < 0.0
+    ):
+        errors.append("board manifest WNS must be nonnegative")
+    board_vivado_fields = {"version", "build", "platform", "launcher"}
+    if exact_fields(board["vivado"], board_vivado_fields, "board Vivado", errors):
+        if board["vivado"]["version"] != "2025.2":
+            errors.append("board Vivado version must be 2025.2")
+        if board["vivado"]["platform"] not in {"native", "wsl-windows"}:
+            errors.append("board Vivado platform is unsupported")
+        if not isinstance(board["vivado"]["build"], str) or UINT_RE.fullmatch(
+            board["vivado"]["build"]
+        ) is None:
+            errors.append("board Vivado build is invalid")
+        if not isinstance(board["vivado"]["launcher"], str) or not board["vivado"][
+            "launcher"
+        ]:
+            errors.append("board Vivado launcher is invalid")
+    if not isinstance(board["invocation"], list) or any(
+        not isinstance(argument, str) or not argument for argument in board["invocation"]
+    ):
+        errors.append("board invocation is invalid")
+    if errors:
+        raise ResultError("; ".join(errors))
+
+    board_dir = inputs[0].parent
+    board_artifacts = {
+        "bitstream": board_dir / "rv32i-soc-arty-a7-35t.bit",
+        "utilization": board_dir / "utilization.rpt",
+        "timing": board_dir / "timing_summary.rpt",
+        "drc": board_dir / "drc.rpt",
+        "placement": board_dir / "placement.tsv",
+    }
+    if not isinstance(board["outputs"], dict) or set(board["outputs"]) != set(
+        board_artifacts
+    ):
+        raise ResultError("board output manifest is malformed")
+    artifact_hashes = {
+        name: require_artifact_hash(path, board["outputs"][name], f"board {name}")
+        for name, path in board_artifacts.items()
+    }
+    xdc_hash = sha256_file(checkout / "boards/arty_a7_35t.xdc", "board constraints")
+    if board["xdc_sha256"] != xdc_hash:
+        raise ResultError("board constraint hash mismatch")
+    drc = board_artifacts["drc"].read_text(encoding="utf-8", errors="replace")
+    if re.search(r"\b(?:CRITICAL WARNING|ERROR)\b", drc, re.IGNORECASE):
+        raise ResultError("board DRC report contains a failure")
+
+    firmware_fields = {"schema", "status", "entry", "elf", "imem", "dmem"}
+    if not exact_fields(firmware, firmware_fields, "firmware manifest", errors):
+        raise ResultError("; ".join(errors))
+    if firmware["schema"] != 1 or firmware["status"] != "complete":
+        raise ResultError("firmware manifest is not complete")
+    if firmware["entry"] != 0:
+        raise ResultError("firmware entry must be zero")
+    firmware_hashes: dict[str, str] = {}
+    for name in ("elf", "imem", "dmem"):
+        artifact = firmware[name]
+        expected_fields = {"path", "sha256"} | ({"words"} if name != "elf" else set())
+        nested_errors: list[str] = []
+        if not exact_fields(artifact, expected_fields, f"firmware {name}", nested_errors):
+            raise ResultError("; ".join(nested_errors))
+        path = artifact_path(artifact["path"], checkout, f"firmware {name}")
+        firmware_hashes[name] = require_artifact_hash(
+            path, artifact["sha256"], f"firmware {name}"
+        )
+        if name != "elf":
+            if artifact["words"] != 8192:
+                raise ResultError(f"firmware {name} must contain 8192 words")
+            try:
+                lines = path.read_text(encoding="ascii").splitlines()
+            except (OSError, UnicodeError) as exc:
+                raise ResultError(f"firmware {name} image is invalid") from exc
+            if len(lines) != 8192 or any(
+                re.fullmatch(r"[0-9a-f]{8}", line) is None for line in lines
+            ):
+                raise ResultError(f"firmware {name} image is not canonical")
+    if not isinstance(board["firmware"], dict) or board["firmware"] != {
+        "imem_sha256": firmware_hashes["imem"],
+        "dmem_sha256": firmware_hashes["dmem"],
+    }:
+        raise ResultError("board and firmware manifests do not match")
+
+    full_tooling, full_rtl = validate_collection_receipts(full, soc, checkout)
+    identities = {
+        source_commit,
+        full_tooling,
+        soc.get("tooling_commit"),
+    }
+    rtl_identities = {rtl_commit, full_rtl, soc.get("rtl_commit")}
+    if len(identities) != 1 or len(rtl_identities) != 1:
+        raise ResultError("board and verification records do not share commits")
+
+    try:
+        from synthesis.summarize_reports import SummaryError, parse_utilization, parse_wns
+        lut, ff, bram, _ = parse_utilization(board_artifacts["utilization"])
+        report_wns = parse_wns(board_artifacts["timing"])
+    except (OSError, SummaryError) as exc:
+        raise ResultError(f"board report parsing failed: {exc}") from exc
+    if abs(report_wns - float(board["wns_ns"])) > 0.0001:
+        raise ResultError("board timing report and manifest WNS differ")
+    input_period = float(board["input_clock_period_ns"])
+    period = float(board["soc_clock_period_ns"])
+    critical = period - report_wns
+    if critical <= 0.0:
+        raise ResultError("board critical path is invalid")
+
+    try:
+        transcript = inputs[4].read_bytes().decode("utf-8").replace("\r\n", "\n")
+    except (OSError, UnicodeError) as exc:
+        raise ResultError("UART transcript is unreadable") from exc
+    expected_transcript = "rv32i soc ready\nexternal irq\nexternal irq\n"
+    if "\r" in transcript or transcript != expected_transcript:
+        raise ResultError("UART transcript is not the complete expected output")
+    observation_errors: list[str] = []
+    if not exact_fields(
+        observations,
+        SOC_OBSERVATION_FIELDS,
+        "manual observations",
+        observation_errors,
+    ):
+        raise ResultError("; ".join(observation_errors))
+    if observations != {
+        "reset_banner": True,
+        "button_presses": 2,
+        "led_transitions": 2,
+        "release_transitions": 0,
+    }:
+        raise ResultError("manual observations do not describe the approved demo")
+
+    references = load_env(checkout / "tools/reference_versions.env", errors)
+    digilent = references.get("DIGILENT_XDC_SHA")
+    if errors or not isinstance(digilent, str) or SHA_RE.fullmatch(digilent) is None:
+        raise ResultError("Digilent XDC metadata is invalid")
+    value = {
+        "schema": 1,
+        "measured_at": board["measured_at"],
+        "tooling_commit": source_commit,
+        "rtl_commit": rtl_commit,
+        "board": "arty-a7-35t",
+        "part": board["part"],
+        "digilent_xdc_sha": digilent,
+        "firmware_sha256": firmware_hashes,
+        "bitstream_sha256": artifact_hashes["bitstream"],
+        "vivado": {
+            "version": board["vivado"]["version"],
+            "build": board["vivado"]["build"],
+            "platform": board["vivado"]["platform"],
+        },
+        "route": {
+            "input_clock_period_ns": f"{input_period:.3f}",
+            "soc_clock_period_ns": f"{period:.3f}",
+            "wns_ns": f"{report_wns:.3f}",
+            "critical_path_ns": f"{critical:.3f}",
+            "fmax_mhz": f"{1000.0 / critical:.3f}",
+            "lut": lut,
+            "ff": ff,
+            "bram_tiles": f"{bram:.1f}",
+            "timing_sha256": artifact_hashes["timing"],
+            "utilization_sha256": artifact_hashes["utilization"],
+            "drc_sha256": artifact_hashes["drc"],
+        },
+        "verification": {
+            "full_status": full["status"],
+            "soc_status": soc["status"],
+            "full_receipt_sha256": sha256_file(inputs[2], "full verification receipt"),
+            "soc_receipt_sha256": sha256_file(inputs[3], "SoC verification receipt"),
+        },
+        "uart": {
+            "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
+            "lines": transcript.rstrip("\n").split("\n"),
+        },
+        "manual_observations": observations,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.tmp")
+    try:
+        write_json(temporary, value)
+        staged_errors: list[str] = []
+        if exact_fields(value, SOC_FIELDS, "SoC result", staged_errors):
+            validate_soc_fields(value, checkout, staged_errors)
+        if staged_errors:
+            raise ResultError("; ".join(staged_errors))
+        temporary.replace(output)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def write_tool_versions(
     checkout: Path,
     output: Path,
@@ -906,8 +1502,8 @@ def source_vector_count(path: Path, label: str, expected: int) -> int:
     return expected
 
 
-def harness_test_count(path: Path) -> int:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def harness_test_count_text(source: str, filename: str) -> int:
+    tree = ast.parse(source, filename=filename)
     return sum(
         1
         for node in tree.body
@@ -918,12 +1514,33 @@ def harness_test_count(path: Path) -> int:
     )
 
 
-def rtl_property_counts(checkout: Path) -> tuple[int, int]:
+def harness_test_count(path: Path) -> int:
+    return harness_test_count_text(path.read_text(encoding="utf-8"), str(path))
+
+
+def strip_sv_comments(source: str) -> str:
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//.*", "", source)
+
+
+def sv_property_counts(source: str) -> tuple[int, int, int]:
+    source = strip_sv_comments(source)
+    return (
+        len(re.findall(r"\bassert\s+property\s*\(", source)),
+        len(re.findall(r"\bassert\s*\(", source)),
+        len(re.findall(r"\bcover\s+property\s*\(", source)),
+    )
+
+
+def checkout_property_counts(checkout: Path) -> tuple[int, int, int]:
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted((checkout / "rtl").rglob("*.sv"))
     )
-    concurrent = len(re.findall(r"\bassert\s+property\s*\(", source))
-    immediate = len(re.findall(r"\bassert\s*\(", source))
+    return sv_property_counts(source)
+
+
+def rtl_property_counts(checkout: Path) -> tuple[int, int]:
+    concurrent, immediate, _ = checkout_property_counts(checkout)
     return concurrent, immediate
 
 
@@ -1027,6 +1644,30 @@ def write_verification_receipt(checkout: Path, output: Path) -> None:
             temporary.unlink()
 
 
+def write_profile_receipt(checkout: Path, output: Path, profile: str) -> None:
+    if profile != "soc":
+        raise ResultError(f"unsupported receipt profile: {profile}")
+    checkout = checkout.resolve()
+    output = output.resolve()
+    value = {
+        "schema": 1,
+        "measured_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "profile": "soc",
+        "status": "complete",
+        "tooling_commit": git_text(checkout, "rev-parse", "HEAD"),
+        "rtl_commit": git_text(checkout, "log", "-1", "--format=%H", "--", "rtl"),
+        "commands": ["make soc-check"],
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.tmp")
+    try:
+        write_json(temporary, value)
+        temporary.replace(output)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1040,6 +1681,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     collect_synth_parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     collect_synth_parser.add_argument("--report-dir", type=Path, required=True)
     collect_synth_parser.add_argument("--output", type=Path, required=True)
+    collect_soc_parser = subparsers.add_parser("collect-soc")
+    collect_soc_parser.add_argument("--board-manifest", type=Path, required=True)
+    collect_soc_parser.add_argument("--firmware-manifest", type=Path, required=True)
+    collect_soc_parser.add_argument("--verification", type=Path, required=True)
+    collect_soc_parser.add_argument("--soc-verification", type=Path, required=True)
+    collect_soc_parser.add_argument("--uart", type=Path, required=True)
+    collect_soc_parser.add_argument("--observations", type=Path, required=True)
+    collect_soc_parser.add_argument("--output", type=Path, required=True)
     versions = subparsers.add_parser("tool-versions")
     versions.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     versions.add_argument("--output", type=Path, required=True)
@@ -1077,6 +1726,22 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         except (ResultError, OSError, ValueError) as exc:
             print(f"synthesis collection failed: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "collect-soc":
+        try:
+            collect_soc(
+                args.board_manifest,
+                args.firmware_manifest,
+                args.verification,
+                args.soc_verification,
+                args.uart,
+                args.observations,
+                args.output,
+            )
+            print(f"wrote SoC result: {args.output}")
+            return 0
+        except (ResultError, OSError, ValueError) as exc:
+            print(f"SoC result collection failed: {exc}", file=sys.stderr)
             return 1
     if args.command == "tool-versions":
         try:

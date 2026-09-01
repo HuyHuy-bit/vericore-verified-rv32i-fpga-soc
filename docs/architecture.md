@@ -2,7 +2,7 @@
 
 ## Overview and design goals
 
-A 5-stage in-order `RV32I_Zicsr_Zifencei` pipeline optimized for **measurable trade-offs over raw performance**: every major design choice below has a cheaper or faster alternative that was deliberately not taken, and the point of the project is to state what it cost. Machine-mode traps, CSRs, timer/software interrupts, and `FENCE.I` are implemented; external interrupts and other ISA extensions are not.
+A 5-stage in-order `RV32I_Zicsr_Zifencei` pipeline optimized for **measurable trade-offs over raw performance**: every major design choice below has a cheaper or faster alternative that was deliberately not taken, and the point of the project is to state what it cost. Machine-mode traps, CSRs, timer/software/external interrupts, and `FENCE.I` are implemented; other ISA extensions are not.
 
 <details>
 <summary>Machine-checked repository facts</summary>
@@ -17,7 +17,8 @@ EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
 EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
 EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
+EVIDENCE_FACT EVIDENCE_STATUS=historical
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
 EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
@@ -29,14 +30,24 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 
 </details>
 
+<!-- portfolio:status:start -->
+Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
+<!-- portfolio:status:end -->
+
+## Integration boundaries
+
+`rv32i_core` is the memory-independent pipeline/cache implementation. It exports the existing instruction/data request-ready channels and accepts `irq_external`. The legacy `cpu` verification and out-of-context synthesis top wraps that core with `instr_mem` and `data_mem`, tying the external interrupt low so its public interface remains compatible.
+
+`rv32i_soc` instantiates `rv32i_core` directly and connects both memory clients to Wishbone adapters, a fair arbiter, decoded BRAMs, UART, and GPIO interrupt logic. `arty_a7_35t_top` adds only the Arty clock, reset/button wiring, LEDs, UART pin, and fixed board parameters. This keeps board integration out of the established CPU harness while exercising the same pipeline RTL. See the [SoC guide](soc.md) for the complete interface and memory map.
+
 ## Pipeline organization
 
 IF → ID → EX → MEM → WB, one instruction wide, in order. See the datapath diagram at the top of the [README](../README.md) for the full block diagram, including both forwarding paths, the load-use stall path, and the next-PC priority mux.
 
-- **IF**: PC → optional I-cache → `instr_mem`. Branch prediction (BTB + 2-bit counters) looks up in parallel with fetch and can redirect the *next* fetch speculatively.
+- **IF**: PC → optional I-cache → instruction memory client. The `cpu` wrapper terminates it at `instr_mem`; the SoC terminates it through Wishbone. Branch prediction (BTB + 2-bit counters) looks up in parallel with fetch and can redirect the *next* fetch speculatively.
 - **ID**: decode (`control.sv`), register read (`reg_file.sv`, with a same-cycle write/read bypass), immediate generation.
 - **EX**: ALU, branch/jump resolution, forwarding mux (EX/MEM and MEM/WB → EX).
-- **MEM**: optional D-cache → `data_mem`; also the single commit point for traps, MRET, and CSR writes.
+- **MEM**: optional D-cache or uncached bypass → data memory client; also the single commit point for traps, MRET, and CSR writes.
 - **WB**: register file write-back.
 
 Every pipeline register carries a `valid` bit end-to-end, so a flushed bubble is distinguishable from a genuinely-retired instruction at every stage — this is what makes the performance counters and precise exceptions exact rather than approximate.
@@ -49,7 +60,7 @@ Each entry: what was chosen, the alternative, what it costs, and the evidence.
 **Chosen:** branches and jumps resolve in EX. **Alternative:** resolve in ID, which would cut the mispredict penalty from 2 cycles to 1. **Cost:** an ID-stage comparator on what's likely close to the critical path already, plus a second forwarding network feeding it (EX/MEM and MEM/WB values would need to reach ID, not just EX). **Evidence:** not isolated — fmax numbers now exist (see Synthesis), but only for the design as structured; no ID-resolve variant was built to compare against, so the specific claim "an ID comparator would cost X MHz" remains an argument, not a measurement. The 2-cycle penalty itself is directly measured: `bpred: mispredicts=N` in every test's perf counters, and the predictor's measured accuracy (80%+ on loop-heavy code, reported per-run by the perf counters) is the reason it doesn't dominate.
 
 ### Global pipeline freeze, not a decoupled front end
-**Chosen:** any memory stall (`pipe_stall`) freezes the *entire* pipeline — PC, all four pipeline registers, the predictor, the CSR file, and the counters — for the cycle. **Alternative:** a fetch buffer between IF and ID would let the back end drain through an instruction-fetch miss instead of stalling on it. **Cost:** this is the single biggest structural limiter in the design (see `cpu.sv`'s `ponytail:` comment at the freeze mux). It inflates both the cached and uncached CPI numbers in the README's Performance section equally, so it doesn't fabricate a cache speedup, but it does mean the I-cache's measured benefit is somewhat inflated relative to what a decoupled front end would show — a D-cache miss currently stalls fetch too, which a real design would avoid. **Not implemented**: a correct fetch-buffer redesign touches the freeze/flush/redirect priority logic this whole codebase's precise-exception and forwarding guarantees are built on. The Spike lockstep regression (see Verification summary) now exists as the regression net that kind of change would need — it just hasn't been attempted yet.
+**Chosen:** any memory stall (`pipe_stall`) freezes the *entire* pipeline — PC, all four pipeline registers, the predictor, the CSR file, and the counters — for the cycle. **Alternative:** a fetch buffer between IF and ID would let the back end drain through an instruction-fetch miss instead of stalling on it. **Cost:** this is the single biggest structural limiter in `rv32i_core`. It inflates both the cached and uncached CPI numbers in the README's Performance section equally, so it doesn't fabricate a cache speedup, but it does mean the I-cache's measured benefit is somewhat inflated relative to what a decoupled front end would show — a D-cache miss currently stalls fetch too, which a real design would avoid. **Not implemented**: a correct fetch-buffer redesign touches the freeze/flush/redirect priority logic this whole codebase's precise-exception and forwarding guarantees are built on. The Spike lockstep regression (see Verification summary) now exists as the regression net that kind of change would need — it just hasn't been attempted yet.
 
 ### Blocking caches, not hit-under-miss
 **Chosen:** both caches are blocking — one outstanding miss stalls everything behind it. **Alternative:** a single MSHR would let independent hits proceed under a miss. **Cost:** simplicity (`dcache.sv`'s FSM is 4 states) against throughput lost to serialization; not quantified here for the same reason as above — it's downstream of the decoupled-front-end work.
@@ -61,7 +72,7 @@ Each entry: what was chosen, the alternative, what it costs, and the evidence.
 **Chosen:** both caches use a simple round-robin/FIFO victim pointer per set (`ponytail:` comments in `icache.sv` and `dcache.sv`). **Alternative:** true LRU. **Cost:** for the associativities actually swept in this project (1-4 way), the plan predicts the difference is usually small for a 2-way cache — that's a real, cheap-to-run finding this pass didn't get to. Not measured here.
 
 ### Single MEM commit point for precise exceptions
-**Chosen:** every control-flow-changing exceptional event (trap, MRET, CSR write) resolves at one point, in MEM, in program order. **Alternative:** none seriously — this is what makes the exception model precise "for free" (see `cpu.sv`'s commit-point comment) rather than needing a reorder buffer. **Cost:** none beyond what precise exceptions cost anywhere: the offending and every younger instruction must be flushable, which is why `valid` is threaded through every pipeline register. This is the foundation the 27 assertions and the directed exception tests check.
+**Chosen:** every control-flow-changing exceptional event (trap, interrupt, MRET, CSR write) resolves at one point, in MEM, in program order. **Alternative:** none seriously — this is what makes the exception model precise without a reorder buffer. **Cost:** none beyond what precise exceptions cost anywhere: the offending and every younger instruction must be flushable, which is why `valid` is threaded through every pipeline register. This is the foundation the assertions and directed exception tests check.
 
 ### BTB-gated prediction (never predicts taken until a first taken hit)
 **Chosen:** a branch is only ever predicted taken after the BTB has already recorded a taken outcome for it — the first execution of any branch is always predicted not-taken. **Cost:** every branch pays a guaranteed misprediction on its first taken occurrence; measured indirectly in the `bpred: accuracy=` figures already reported per test/kernel.
@@ -111,7 +122,7 @@ Bimodal lands near chance (49.2%) because it genuinely cannot see the correlatio
 
 That is the invalidation demonstrably working — roughly two extra misses per iteration, and a 3.5× CPI penalty for discarding the cache every time round.
 
-What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_mem.sv` and `data_mem.sv` are separate arrays — a Harvard split, not merely split caches over unified memory — so a store can never reach code space at all, and self-modifying code isn't expressible here with or without the fence. The instruction is implemented because it's part of the ISA and its cache-invalidate semantics are real and testable; the coherence problem it exists to solve is gated behind a unified memory this design doesn't have. Worth stating plainly rather than letting "FENCE.I implemented" imply more than it delivers.
+What this core **cannot** demonstrate is `FENCE.I` doing its actual self-modifying-code job. The legacy wrapper uses separate `instr_mem.sv` and `data_mem.sv` arrays. The SoC lets data loads read instruction BRAM but rejects instruction-BRAM writes. A store therefore cannot modify code in either integration. The instruction's commit, invalidation, flush, and refetch behavior is real and testable; writable unified instruction storage is outside the design contract.
 
 ### A structural read-only-CSR convention, not a hand-maintained permission table
 **Chosen:** CSR write permission is derived from address bits `[11:10] == 2'b11` (the standard RISC-V convention), rather than a per-CSR read/write flag. **Cost:** none found — this is a case where following the spec's own structural convention was strictly simpler than the alternative, not a trade-off with a real downside.
@@ -133,7 +144,9 @@ What this core **cannot** demonstrate is `FENCE.I` doing its actual job. `instr_
 
 ![Memory hierarchy](images/mem_hierarchy.svg)
 
-`lsu.sv` handles RV32I subword load/store semantics (sign/zero extension, byte-enable generation); `dcache.sv`/`icache.sv` hold geometry and policy; `mem_timing.sv` is the backing-memory access-cost model everything above scales against. The burst-refill discount it models (full `LATENCY` for the first word of a block, 1 cycle per sequential word after) is what makes the block-size sweep in the README's Performance section mean anything — without it, every block size above one word would look strictly worse, which would be an artifact of the model, not a property of caches.
+`lsu.sv` handles RV32I subword load/store semantics (sign/zero extension, byte-enable generation); `dcache.sv`/`icache.sv` hold geometry and policy. The legacy `cpu` wrapper connects them to `mem_timing.sv` plus the simulation memories. Its burst-refill discount (full `LATENCY` for the first word of a block, 1 cycle per sequential word after) is what makes the block-size sweep in the README's Performance section meaningful.
+
+The SoC uses the same cache backing clients but treats each word as an independent Wishbone Classic transfer. Only `0x2000_0000–0x2000_7FFF` is D-cacheable; instruction-BRAM data reads and all MMIO bypass the D-cache. Separate instruction/data adapters share a round-robin arbiter and decoded BRAM/UART/GPIO slaves. Bus errors become sticky integration faults rather than architectural access-fault traps.
 
 ![D-cache FSM](images/cache_fsm.svg)
 
@@ -206,7 +219,7 @@ It is strictly simpler than the D-cache version, for a structural reason: this c
 
 The general lesson, worth more than the numbers: **`ram_style="block"` is a request, not an instruction.** When synthesis declines it, it says so in a warning that's easy to miss in a 60,000-line log, and the reason is usually that the RTL is asking for something a BRAM port cannot physically do.
 
-One honest caveat on the fmax figures: the reported critical paths (`report_timing`'s worst-path listings) show a source/destination pairing — e.g. a performance-counter register driving into the PC register — that isn't a real architectural dependency. This is very likely an artifact of out-of-context synthesis with a dozen `perf_*`/`dbg_*` outputs that don't feed anything beyond the module boundary, giving the optimizer freedom to share resources in ways that produce confusing endpoint names. The fmax *numbers* are real (they're what the implemented netlist's static timing analysis actually computed), but attributing the bottleneck to a specific named stage would be overclaiming past what this data supports. A synthesis run with the perf/debug ports genuinely connected to something (a real SoC integration, or at minimum a register slice deliberately intended to consume them) would give cleaner attribution.
+One honest caveat on the fmax figures: the reported critical paths (`report_timing`'s worst-path listings) show a source/destination pairing — e.g. a performance-counter register driving into the PC register — that isn't a real architectural dependency. This is very likely an artifact of out-of-context synthesis with a dozen `perf_*`/`dbg_*` outputs that don't feed anything beyond the module boundary, giving the optimizer freedom to share resources in ways that produce confusing endpoint names. The fmax *numbers* are real (they're what the implemented netlist's static timing analysis actually computed), but attributing the bottleneck to a specific named stage would be overclaiming past what this data supports. The integrated board top uses a 50 MHz SoC clock derived from the 100 MHz board oscillator, but its route is not published and cannot yet replace these measurements.
 
 ### One measured timing optimization
 
@@ -237,11 +250,11 @@ See [`verification.md`](verification.md) for the full breakdown. In one line eac
 
 Kept in the same honest tone as the README's Notes section, because a list like this is worth more than it costs to write:
 
-- **The backing memories are still simulation-scale arrays.** Both caches use the per-way flat-array structure needed for Block RAM inference, while `instr_mem.sv` and `data_mem.sv` retain combinational interfaces rather than a production BRAM or bus protocol.
+- **The verified legacy wrapper still uses simulation memories.** The board integration adds initialized Wishbone BRAM slaves, but no external-memory controller or unified writable instruction/data memory.
 - **fmax is still a working number, not a good one.** The current matrix spans 70.6–76.3 MHz and misses the aggressive 500 MHz target. No retiming of the tag-compare/way-select path or shortening of the redirect priority mux has been attempted.
 - **No decoupled front end, no non-blocking caches, no store buffer.** Each is a significant redesign of the freeze/flush/redirect logic the Spike lockstep regression now protects; none has been attempted.
-- **`FENCE.I` cannot demonstrate unified-memory coherence.** It commits, invalidates the I-cache, flushes younger fetches, and refetches from `pc+4`; the separate instruction/data backing arrays prevent stores to code space, so self-modifying-code visibility is outside this memory model.
-- **No AXI wrapper.** The bespoke `req`/`burst`/`ready` memory-port protocol works but isn't the industry-standard interface an SoC integration would expect.
-- **No external interrupt.** `mie`/`mip` only implement the software and timer bits; there's no `mip.MEIP` and nothing to drive it, since this core has no interrupt controller or SoC fabric to source an external interrupt from.
+- **`FENCE.I` cannot demonstrate unified-memory coherence.** It commits, invalidates the I-cache, flushes younger fetches, and refetches from `pc+4`; both integrations prevent stores to code space.
+- **Wishbone is internal, not an expansion interface.** The SoC has a tested Wishbone B4 Classic fabric, but no AXI/TileLink bridge or external bus port.
+- **One external interrupt source, no PLIC.** The core implements `MEIP`/`MEIE` and cause 11; the SoC connects one sticky GPIO source without claim/complete or multi-source prioritization.
 - **RAS is speculative and unrepaired.** Pushes/pops happen at fetch time, before the pipeline knows whether that fetch is even on the correct path, and a misprediction flush doesn't roll the stack back — see the Return-address stack section above for a measured example of this actually happening.
 - **RV32 only.** `XLEN` is a package parameter and the datapath elaborates cleanly at `XLEN=64` (verified this pass), but RV64 additionally needs `LD`/`SD` and the `*W` instruction forms — decode work in `control.sv`/`lsu.sv` that hasn't been done.
