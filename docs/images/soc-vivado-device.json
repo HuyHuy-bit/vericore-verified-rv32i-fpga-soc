@@ -1,0 +1,44 @@
+{
+  "capture": {
+    "highlighted_regions": {
+      "core": "blue",
+      "data_cache": "magenta",
+      "data_memory": "red",
+      "instruction_memory": "green"
+    },
+    "image_sha256": "9dca4f28624b9ceeeb74267e0fdb83f19481b27985ae7f17512981dd470dce59",
+    "routed_checkpoint_sha256": "1cd4a9deb3939c114273f7b14fbc22a15df292a3bd137c6d7e651e83a71f3556",
+    "view": "Vivado implemented-device Device window with hierarchy highlights"
+  },
+  "firmware": {
+    "dmem_sha256": "e2a781641ce9637c52daea07f06ac16fe70ee751f4f4261477f77d6372a0f329",
+    "imem_sha256": "9f96b12eb89dc02b0f4aa32893960e8ae22bc9ce025c7a75a55b6812467bf70c"
+  },
+  "input_clock_period_ns": 10.0,
+  "part": "xc7a35ticsg324-1L",
+  "post_route_timing_simulation": {
+    "generated_netlist_sha256": "e9db9b391c339ca31cd389ba27948a0bd8c64b2b06d9dea88a289a2880ffda92",
+    "led": 1,
+    "measured_at": "2026-09-01T03:05:30Z",
+    "mode": "post-implementation",
+    "sdf_sha256": "79b1037c5cf981c0fe736596e6a855bf3d1494beb27257d0826c806d8388d1d8",
+    "status": "complete",
+    "testbench": "arty_post_route_tb",
+    "timing_report_sha256": "eac4527d391e75515afc1c289e5f2e91825e2ced2d14aa0dc25e8bd61c4a240c",
+    "transcript_sha256": "2db53c3306653ab89ffc9b7b03fffd7a081722c9412b7936ae4ac46e623607e2",
+    "type": "timing",
+    "uart": "rv32i soc ready\n",
+    "wns_ns": 2.009
+  },
+  "rtl_commit": "d21ecd3fe310bf49c505220c134f8cfd205c90e5",
+  "schema": 1,
+  "soc_clock_period_ns": 20.0,
+  "source_commit": "4f769a5bc7357222e4958af77e828e47ab8604ee",
+  "top": "arty_a7_35t_top",
+  "vivado": {
+    "build": "6299465",
+    "platform": "wsl-windows",
+    "version": "2025.2"
+  },
+  "wns_ns": 2.009
+}

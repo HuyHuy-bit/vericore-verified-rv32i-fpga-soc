@@ -5,6 +5,7 @@ from html import escape
 import json
 import os
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 
@@ -119,6 +120,65 @@ class PublishedFloorplanTest(unittest.TestCase):
             root / "docs/images/soc-floorplan.json",
             root,
         )
+
+    def test_published_vivado_capture_matches_its_provenance(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        image = root / "docs/images/soc-vivado-device.png"
+        metadata = json.loads(
+            (root / "docs/images/soc-vivado-device.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        floorplan = json.loads(
+            (root / "docs/images/soc-floorplan.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(metadata["schema"], 1)
+        self.assertEqual(
+            metadata["capture"]["image_sha256"],
+            hashlib.sha256(image.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(image.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(
+            struct.unpack(">II", image.read_bytes()[16:24]), (1936, 1048)
+        )
+        fields = (
+            "part",
+            "rtl_commit",
+            "input_clock_period_ns",
+            "soc_clock_period_ns",
+            "wns_ns",
+        )
+        for key in fields:
+            self.assertEqual(metadata[key], floorplan[key])
+        self.assertEqual(metadata["vivado"]["version"], "2025.2")
+        self.assertEqual(metadata["vivado"]["build"], "6299465")
+        self.assertEqual(
+            metadata["capture"]["highlighted_regions"],
+            {
+                "core": "blue",
+                "data_cache": "magenta",
+                "data_memory": "red",
+                "instruction_memory": "green",
+            },
+        )
+        simulation = metadata["post_route_timing_simulation"]
+        self.assertEqual(simulation["status"], "complete")
+        self.assertEqual(simulation["mode"], "post-implementation")
+        self.assertEqual(simulation["type"], "timing")
+        self.assertEqual(simulation["testbench"], "arty_post_route_tb")
+        self.assertEqual(simulation["uart"], "rv32i soc ready\n")
+        self.assertEqual(simulation["led"], 1)
+        self.assertEqual(simulation["wns_ns"], metadata["wns_ns"])
+        hashes = [
+            metadata["capture"]["routed_checkpoint_sha256"],
+            metadata["firmware"]["imem_sha256"],
+            metadata["firmware"]["dmem_sha256"],
+            simulation["generated_netlist_sha256"],
+            simulation["sdf_sha256"],
+            simulation["timing_report_sha256"],
+            simulation["transcript_sha256"],
+        ]
+        self.assertTrue(all(len(value) == 64 for value in hashes))
 
 
 if __name__ == "__main__":
