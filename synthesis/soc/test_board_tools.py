@@ -154,6 +154,16 @@ class BoardContractTest(unittest.TestCase):
         rejection = source.index('error "setup timing failed with WNS $wns"')
         self.assertLess(report, rejection)
 
+    def test_routed_build_exports_primitive_tile_locations(self) -> None:
+        source = (ROOT / "synthesis/soc/build.tcl").read_text(encoding="utf-8")
+        route = source.index("route_design")
+        placement = source.index('placement.tsv')
+        self.assertLess(route, placement)
+        self.assertIn("get_cells -hier -filter {IS_PRIMITIVE == 1}", source)
+        self.assertIn("get_tiles -quiet -of_objects $site", source)
+        self.assertIn("get_property TILE_X $tile", source)
+        self.assertIn("get_property TILE_Y $tile", source)
+
     def test_board_clock_is_locked_at_fifty_megahertz(self) -> None:
         clock = (ROOT / "rtl/boards/arty_clock.sv").read_text(encoding="utf-8")
         top = (ROOT / "rtl/boards/arty_a7_35t_top.sv").read_text(encoding="utf-8")
@@ -279,6 +289,8 @@ class BoardRunnerTest(unittest.TestCase):
             "[ \"$mode\" != missing_constraint_checks ] || sed -i '/checking /d' \"$out/timing_summary.rpt\"\n"
             "[ \"$mode\" = missing_drc ] || printf 'DRC clean\\n' > \"$out/drc.rpt\"\n"
             "[ \"$mode\" = drc_error ] && printf 'CRITICAL WARNING test\\n' > \"$out/drc.rpt\"\n"
+            "[ \"$mode\" = missing_placement ] || printf 'placement_schema\\t1\\npart\\txc7a35ticsg324-1L\\nbounds\\t0\\t100\\t0\\t100\\ncell\\tprimitive\\tsite\\tbel\\ttile\\ttile_x\\ttile_y\\nsoc/u_core/u_backend/u_alu/result_reg[0]\\tFDRE\\tSLICE_X0Y0\\tAFF\\tCLBLL_L_X0Y0\\t10\\t20\\n' > \"$out/placement.tsv\"\n"
+            "[ \"$mode\" != malformed_placement ] || printf 'bad\\n' > \"$out/placement.tsv\"\n"
             "[ \"$mode\" = missing_bitstream ] || printf 'bitstream\\n' > \"$out/rv32i-soc-arty-a7-35t.bit\"\n"
             "printf 'do not publish\\n' > \"$out/extra.log\"\n"
             "[ \"$mode\" != stale ] || touch -t 200001010000 \"$out/rv32i-soc-arty-a7-35t.bit\"\n"
@@ -343,6 +355,7 @@ class BoardRunnerTest(unittest.TestCase):
             [
                 "drc.rpt",
                 "manifest.json",
+                "placement.tsv",
                 "rv32i-soc-arty-a7-35t.bit",
                 "timing_summary.rpt",
                 "utilization.rpt",
@@ -356,6 +369,10 @@ class BoardRunnerTest(unittest.TestCase):
         self.assertEqual(manifest["source_commit"], self.commit)
         self.assertEqual(manifest["rtl_commit"], self.commit)
         self.assertEqual(manifest["vivado"]["version"], "2025.2")
+        self.assertEqual(
+            manifest["outputs"]["placement"],
+            run_board.sha256(self.output / "placement.tsv"),
+        )
         self.assertRegex(
             manifest["measured_at"],
             r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
@@ -404,6 +421,8 @@ class BoardRunnerTest(unittest.TestCase):
             "missing_util": "utilization report is missing",
             "missing_timing": "timing report is missing",
             "missing_drc": "DRC report is missing",
+            "missing_placement": "placement data is missing",
+            "malformed_placement": "placement data",
             "missing_meta": "build metadata is missing",
             "stale": "bitstream is stale",
             "wrong_part": "wrong applied part",

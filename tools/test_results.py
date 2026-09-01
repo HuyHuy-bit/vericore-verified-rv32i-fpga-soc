@@ -693,6 +693,7 @@ class SocResultTest(unittest.TestCase):
             "utilization": board / "utilization.rpt",
             "timing": board / "timing_summary.rpt",
             "drc": board / "drc.rpt",
+            "placement": board / "placement.tsv",
         }
         artifacts["bitstream"].write_bytes(b"bitstream\n")
         artifacts["utilization"].write_text(
@@ -704,6 +705,14 @@ class SocResultTest(unittest.TestCase):
         )
         artifacts["timing"].write_text("WNS(ns)\n--------\n0.250\n", encoding="utf-8")
         artifacts["drc"].write_text("DRC clean\n", encoding="utf-8")
+        artifacts["placement"].write_text(
+            "placement_schema\t1\npart\txc7a35ticsg324-1L\n"
+            "bounds\t0\t1\t0\t1\n"
+            "cell\tprimitive\tsite\tbel\ttile\ttile_x\ttile_y\n"
+            "soc/u_core/u_backend/value_reg\tFDRE\tSLICE_X0Y0\tAFF\t"
+            "CLBLL_L_X0Y0\t0\t0\n",
+            encoding="utf-8",
+        )
         image = "00000000\n" * 8192
         elf = firmware / "firmware.elf"
         imem = firmware / "firmware-imem.hex"

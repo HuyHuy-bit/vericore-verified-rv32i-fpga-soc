@@ -45,6 +45,10 @@ SOC_DMEM = $(SOC_BUILD_DIR)/firmware-dmem.hex
 SOC_MANIFEST = $(SOC_BUILD_DIR)/firmware-images.json
 SOC_BOARD_DIR ?= $(SOC_BUILD_DIR)/board
 SOC_BITSTREAM ?= $(SOC_BOARD_DIR)/rv32i-soc-arty-a7-35t.bit
+SOC_PLACEMENT ?= $(SOC_BOARD_DIR)/placement.tsv
+SOC_BOARD_MANIFEST ?= $(SOC_BOARD_DIR)/manifest.json
+SOC_FLOORPLAN ?= docs/images/soc-floorplan.svg
+SOC_FLOORPLAN_METADATA ?= docs/images/soc-floorplan.json
 SOC_RTL_COMMIT ?=
 SOC_SIM_DIR ?= obj_dir_soc
 SOC_SIM = $(SOC_SIM_DIR)/Vrv32i_soc
@@ -182,7 +186,7 @@ soc-lint:
 		rtl/verilator.vlt $(SOC_SRCS) rtl/soc/reset_controller.sv rtl/boards/*.sv
 
 soc-board-test:
-	python3 -m unittest -v synthesis.soc.test_board_tools
+	python3 -m unittest -v synthesis.soc.test_board_tools synthesis.soc.test_floorplan
 
 soc-check: soc-unit soc-firmware soc-sim soc-lint soc-board-test
 
@@ -190,6 +194,16 @@ soc-bitstream: soc-firmware
 	VIVADO="$(VIVADO)" python3 -m synthesis.soc.run_board build \
 		--imem "$(SOC_IMEM)" --dmem "$(SOC_DMEM)" \
 		--output "$(SOC_BOARD_DIR)" $(if $(strip $(SOC_RTL_COMMIT)),--rtl-commit "$(SOC_RTL_COMMIT)",)
+
+soc-floorplan:
+	python3 -m synthesis.soc.render_floorplan --placement "$(SOC_PLACEMENT)" \
+		--manifest "$(SOC_BOARD_MANIFEST)" --output "$(SOC_FLOORPLAN)" \
+		--metadata "$(SOC_FLOORPLAN_METADATA)"
+
+soc-floorplan-check:
+	python3 -m synthesis.soc.render_floorplan --placement "$(SOC_PLACEMENT)" \
+		--manifest "$(SOC_BOARD_MANIFEST)" --output "$(SOC_FLOORPLAN)" \
+		--metadata "$(SOC_FLOORPLAN_METADATA)" --check
 
 soc-program:
 	VIVADO="$(VIVADO)" python3 -m synthesis.soc.run_board program \

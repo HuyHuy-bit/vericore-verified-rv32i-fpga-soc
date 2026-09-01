@@ -25,6 +25,47 @@ report_timing_summary -delay_type min_max -report_unconstrained \
     -file "$output_dir/timing_summary.rpt"
 report_drc -file "$output_dir/drc.rpt"
 
+set all_tiles [get_tiles]
+set tile_x_values [lsort -integer [get_property TILE_X $all_tiles]]
+set tile_y_values [lsort -integer [get_property TILE_Y $all_tiles]]
+set tile_min_x [lindex $tile_x_values 0]
+set tile_max_x [lindex $tile_x_values end]
+set tile_min_y [lindex $tile_y_values 0]
+set tile_max_y [lindex $tile_y_values end]
+set placement [open "$output_dir/placement.tsv" w]
+puts $placement "placement_schema\t1"
+puts $placement "part\t$part"
+puts $placement "bounds\t$tile_min_x\t$tile_max_x\t$tile_min_y\t$tile_max_y"
+puts $placement "cell\tprimitive\tsite\tbel\ttile\ttile_x\ttile_y"
+set placement_count 0
+foreach cell [lsort [get_cells -hier -filter {IS_PRIMITIVE == 1}]] {
+    set sites [get_sites -quiet -of_objects $cell]
+    if {[llength $sites] != 1} {
+        continue
+    }
+    set site [lindex $sites 0]
+    set tiles [get_tiles -quiet -of_objects $site]
+    if {[llength $tiles] != 1} {
+        continue
+    }
+    set tile [lindex $tiles 0]
+    set primitive [get_property REF_NAME $cell]
+    set bel [get_property BEL $cell]
+    set tile_x [get_property TILE_X $tile]
+    set tile_y [get_property TILE_Y $tile]
+    set values [list $cell $primitive $site $bel $tile $tile_x $tile_y]
+    if {[regexp {[\t\r\n]} [join $values ""]]} {
+        close $placement
+        error "placement value contains a control character"
+    }
+    puts $placement [join $values "\t"]
+    incr placement_count
+}
+close $placement
+if {$placement_count == 0} {
+    error "no placed primitives were exported"
+}
+
 set input_clocks [get_clocks clk100]
 if {[llength $input_clocks] != 1} {
     error "expected exactly one clk100 clock"

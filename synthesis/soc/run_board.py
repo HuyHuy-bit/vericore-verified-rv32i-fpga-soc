@@ -25,6 +25,7 @@ from synthesis.run_synth import (
     source_identity,
     wslpath,
 )
+from synthesis.soc.render_floorplan import FloorplanError, load_placement
 
 
 PART = "xc7a35ticsg324-1L"
@@ -36,6 +37,7 @@ PROGRAM_MARKER = "===SOC_PROGRAM_DONE==="
 PUBLISHED_FILES = {
     "drc.rpt",
     "manifest.json",
+    "placement.tsv",
     "rv32i-soc-arty-a7-35t.bit",
     "timing_summary.rpt",
     "utilization.rpt",
@@ -52,6 +54,7 @@ class BoardArtifacts:
     utilization: Path
     timing: Path
     drc: Path
+    placement: Path
     metadata: Path
 
 
@@ -156,6 +159,7 @@ def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts,
         utilization=directory / "utilization.rpt",
         timing=directory / "timing_summary.rpt",
         drc=directory / "drc.rpt",
+        placement=directory / "placement.tsv",
         metadata=directory / "build_meta.txt",
     )
     labels = {
@@ -163,6 +167,7 @@ def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts,
         artifacts.utilization: "utilization report",
         artifacts.timing: "timing report",
         artifacts.drc: "DRC report",
+        artifacts.placement: "placement data",
         artifacts.metadata: "build metadata",
     }
     for path, label in labels.items():
@@ -186,6 +191,10 @@ def validate_artifacts(directory: Path, started: float) -> tuple[BoardArtifacts,
     drc = artifacts.drc.read_text(encoding="utf-8", errors="replace")
     if re.search(r"\b(?:CRITICAL WARNING|ERROR)\b", drc, re.IGNORECASE):
         raise BoardError("DRC contains a critical warning or error")
+    try:
+        load_placement(artifacts.placement)
+    except FloorplanError as exc:
+        raise BoardError(f"placement data is invalid: {exc}") from exc
     return artifacts, wns
 
 
@@ -216,7 +225,8 @@ def validate_output_destination(path: Path) -> None:
         raise BoardError(f"board output is not a directory: {path}")
     children = tuple(path.iterdir())
     entries = {entry.name for entry in children}
-    if entries != PUBLISHED_FILES or any(
+    legacy_files = PUBLISHED_FILES - {"placement.tsv"}
+    if entries not in (PUBLISHED_FILES, legacy_files) or any(
         entry.is_symlink() or not entry.is_file() for entry in children
     ):
         raise BoardError("existing board output has unexpected entries")
@@ -291,11 +301,13 @@ def run_build(
                 "utilization": publish / artifacts.utilization.name,
                 "timing": publish / artifacts.timing.name,
                 "drc": publish / artifacts.drc.name,
+                "placement": publish / artifacts.placement.name,
             }
             shutil.copy2(artifacts.bitstream, copied["bitstream"])
             shutil.copy2(artifacts.utilization, copied["utilization"])
             shutil.copy2(artifacts.timing, copied["timing"])
             shutil.copy2(artifacts.drc, copied["drc"])
+            shutil.copy2(artifacts.placement, copied["placement"])
             manifest = {
                 "schema": 1,
                 "status": "complete",

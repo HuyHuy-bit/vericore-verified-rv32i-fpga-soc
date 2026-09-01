@@ -1286,6 +1286,7 @@ def collect_soc(
         "utilization": board_dir / "utilization.rpt",
         "timing": board_dir / "timing_summary.rpt",
         "drc": board_dir / "drc.rpt",
+        "placement": board_dir / "placement.tsv",
     }
     if not isinstance(board["outputs"], dict) or set(board["outputs"]) != set(
         board_artifacts
