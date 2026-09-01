@@ -24,6 +24,7 @@ compliance/*.hex
 compliance/*.sig.output
 
 # Vivado/synthesis output
+syn/
 synthesis/reports/
 synthesis/.synth-reports-*/
 synthesis/out_*/
@@ -37,6 +38,12 @@ synthesis/soc/out_*/
 *.str
 *.log
 *.rpt
+*.lck
+*.pb
+*.rdi
+*.rpx
+*.wdb
+*.wcfg
 *.cache/
 *.gen/
 *.hw/
