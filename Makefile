@@ -47,6 +47,7 @@ SOC_BOARD_DIR ?= $(SOC_BUILD_DIR)/board
 SOC_BITSTREAM ?= $(SOC_BOARD_DIR)/rv32i-soc-arty-a7-35t.bit
 SOC_PLACEMENT ?= $(SOC_BOARD_DIR)/placement.tsv
 SOC_BOARD_MANIFEST ?= $(SOC_BOARD_DIR)/manifest.json
+SOC_POST_ROUTE_DIR ?= $(SOC_BUILD_DIR)/post-route-sim
 SOC_FLOORPLAN ?= docs/images/soc-floorplan.svg
 SOC_FLOORPLAN_METADATA ?= docs/images/soc-floorplan.json
 SOC_RTL_COMMIT ?=
@@ -86,7 +87,7 @@ endif
 endif
 HEXFILES = $(patsubst %,tests/%.hex,$(TESTS))
 
-.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-unit soc-sim soc-lint soc-board-test soc-check soc-bitstream soc-program
+.PHONY: all config-check config-id sim assemble test focused-test predictor-metrics predictor-test unit harness-test evidence-check check env-check env-check-native verify verify-native verify-profile verify-image memtiming bench lint wave clean coverage soak soak-lockstep lockstep lockstep-sample lockstep-sim compliance synth-matrix synth-summary results-check results-open results-synth portfolio-render portfolio-render-check portfolio-demo portfolio-demo-record portfolio-gif portfolio-check soc-image-test soc-unit soc-sim soc-lint soc-board-test soc-check soc-bitstream soc-post-route-sim soc-program
 
 # Default: build, assemble, run the full suite.
 all: sim assemble test
@@ -194,6 +195,11 @@ soc-bitstream: soc-firmware
 	VIVADO="$(VIVADO)" python3 -m synthesis.soc.run_board build \
 		--imem "$(SOC_IMEM)" --dmem "$(SOC_DMEM)" \
 		--output "$(SOC_BOARD_DIR)" $(if $(strip $(SOC_RTL_COMMIT)),--rtl-commit "$(SOC_RTL_COMMIT)",)
+
+soc-post-route-sim: soc-firmware
+	VIVADO="$(VIVADO)" python3 -m synthesis.soc.run_board timing-sim \
+		--imem "$(SOC_IMEM)" --dmem "$(SOC_DMEM)" \
+		--output "$(SOC_POST_ROUTE_DIR)" $(if $(strip $(SOC_RTL_COMMIT)),--rtl-commit "$(SOC_RTL_COMMIT)",)
 
 soc-floorplan:
 	python3 -m synthesis.soc.render_floorplan --placement "$(SOC_PLACEMENT)" \

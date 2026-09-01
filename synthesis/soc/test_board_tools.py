@@ -92,8 +92,10 @@ class BoardContractTest(unittest.TestCase):
     def test_board_flow_sources_exist(self) -> None:
         for relative in (
             "synthesis/soc/build.tcl",
+            "synthesis/soc/post_route_sim.tcl",
             "synthesis/soc/program.tcl",
             "synthesis/soc/run_board.py",
+            "sim/arty_post_route_tb.sv",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
@@ -135,6 +137,39 @@ class BoardContractTest(unittest.TestCase):
         )
         self.assertEqual(program.returncode, 0, program.stdout + program.stderr)
         self.assertIn("python3 -m synthesis.soc.run_board program", program.stdout)
+        timing = subprocess.run(
+            ["make", "-n", "soc-post-route-sim", "VIVADO=/tools/vivado"],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(timing.returncode, 0, timing.stdout + timing.stderr)
+        self.assertIn(
+            "python3 -m synthesis.soc.run_board timing-sim", timing.stdout
+        )
+
+    def test_post_route_simulation_uses_the_routed_netlist_and_sdf(self) -> None:
+        source = (ROOT / "synthesis/soc/post_route_sim.tcl").read_text(
+            encoding="utf-8"
+        )
+        route = source.index("route_design")
+        netlist = source.index("write_verilog -force -mode timesim")
+        sdf = source.index("write_sdf -force")
+        simulation = source.index(
+            "launch_simulation -mode post-implementation -type timing"
+        )
+        self.assertLess(route, netlist)
+        self.assertLess(route, sdf)
+        self.assertLess(sdf, simulation)
+        self.assertIn("-sdf_anno true", source)
+        self.assertIn("report_timing_summary", source)
+        testbench = (ROOT / "sim/arty_post_route_tb.sv").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("arty_a7_35t_top dut", testbench)
+        self.assertIn('"rv32i soc ready\\n"', testbench)
+        self.assertIn("PASS Arty A7 post-route timing simulation", testbench)
 
     def test_program_tcl_checks_the_jtag_visible_die_and_done_bit(self) -> None:
         source = (ROOT / "synthesis/soc/program.tcl").read_text(encoding="utf-8")
@@ -191,6 +226,7 @@ class BoardRunnerTest(unittest.TestCase):
             "rtl/soc",
             "rtl/boards",
             "boards",
+            "sim",
             "synthesis/soc",
         ):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
@@ -208,7 +244,9 @@ class BoardRunnerTest(unittest.TestCase):
         for relative in (
             "boards/arty_a7_35t.xdc",
             "synthesis/soc/build.tcl",
+            "synthesis/soc/post_route_sim.tcl",
             "synthesis/soc/program.tcl",
+            "sim/arty_post_route_tb.sv",
         ):
             source = ROOT / relative
             (self.repo / relative).write_text(
@@ -266,6 +304,20 @@ class BoardRunnerTest(unittest.TestCase):
             "done\n"
             "if [[ \"$script\" = *program.tcl ]]; then\n"
             "  [ \"$mode\" = program_missing_marker ] || echo '===SOC_PROGRAM_DONE==='\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [[ \"$script\" = *post_route_sim.tcl ]]; then\n"
+            "  [ -n \"$out\" ] || exit 92\n"
+            "  [ -f sim/arty_post_route_tb.sv ] || exit 93\n"
+            "  mkdir -p \"$out\"\n"
+            "  printf 'part=xc7a35ticsg324-1L\\ninput_clock_period_ns=10.000\\nsoc_clock_period_ns=20.000\\nwns_ns=0.250\\ntop=arty_a7_35t_top\\ntestbench=arty_post_route_tb\\nmode=post-implementation\\ntype=timing\\n' > \"$out/post_route_sim_meta.txt\"\n"
+            "  [ \"$mode\" != timing_wrong_mode ] || sed -i 's/type=timing/type=functional/' \"$out/post_route_sim_meta.txt\"\n"
+            "  printf 'WNS(ns) 0.250\\nchecking no_clock (0)\\nchecking unconstrained_internal_endpoints (0)\\n' > \"$out/timing_summary.rpt\"\n"
+            "  printf 'initial $sdf_annotate(\"arty_a7_35t_top.sdf\");\\n' > \"$out/arty_a7_35t_top_timesim.v\"\n"
+            "  printf '(DELAYFILE\\n (DESIGN \"arty_a7_35t_top\")\\n)\\n' > \"$out/arty_a7_35t_top.sdf\"\n"
+            "  [ \"$mode\" != timing_missing_sdf ] || rm -f \"$out/arty_a7_35t_top.sdf\"\n"
+            "  [ \"$mode\" = timing_missing_pass ] || echo 'PASS Arty A7 post-route timing simulation'\n"
+            "  [ \"$mode\" = timing_missing_marker ] || echo '===SOC_POST_ROUTE_SIM_DONE==='\n"
             "  exit 0\n"
             "fi\n"
             "[ -n \"$out\" ] || exit 90\n"
@@ -340,6 +392,44 @@ class BoardRunnerTest(unittest.TestCase):
         self.assertIn(diagnostic, output)
         self.assertNotIn("Traceback", output)
 
+    def run_timing_sim(self, **environment: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["VIVADO"] = str(self.fake)
+        env.update(environment)
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "synthesis.soc.run_board",
+                "timing-sim",
+                "--root",
+                str(self.repo),
+                "--imem",
+                str(self.imem),
+                "--dmem",
+                str(self.dmem),
+                "--output",
+                str(self.output),
+                "--rtl-commit",
+                self.commit,
+                "--timeout",
+                "1",
+            ],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
+
+    def assert_timing_failure(self, diagnostic: str, **environment: str) -> None:
+        result = self.run_timing_sim(**environment)
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn(diagnostic, output)
+        self.assertNotIn("Traceback", output)
+
     def test_firmware_images_are_canonical_and_bounded(self) -> None:
         digest = run_board.validate_firmware_image(self.imem)
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
@@ -404,6 +494,47 @@ class BoardRunnerTest(unittest.TestCase):
                 "synthesis/soc/program.tcl",
             ],
         )
+
+    def test_timing_stage_adds_only_the_testbench_and_timing_script(self) -> None:
+        with run_board.create_board_stage(
+            self.repo, None, self.imem, self.dmem, timing_sim=True
+        ) as stage_name:
+            stage = Path(stage_name)
+            files = {
+                path.relative_to(stage).as_posix()
+                for path in stage.rglob("*")
+                if path.is_file()
+            }
+        self.assertIn("sim/arty_post_route_tb.sv", files)
+        self.assertIn("synthesis/soc/post_route_sim.tcl", files)
+
+    def test_timing_simulation_publishes_compact_validated_evidence(self) -> None:
+        result = self.run_timing_sim()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            sorted(path.name for path in self.output.iterdir()),
+            ["manifest.json", "transcript.txt"],
+        )
+        manifest = json.loads((self.output / "manifest.json").read_text())
+        self.assertEqual(manifest["mode"], "post-implementation")
+        self.assertEqual(manifest["type"], "timing")
+        self.assertEqual(manifest["part"], "xc7a35ticsg324-1L")
+        self.assertEqual(manifest["testbench"], "arty_post_route_tb")
+        self.assertRegex(manifest["generated"]["sdf_sha256"], r"^[0-9a-f]{64}$")
+        transcript = (self.output / "transcript.txt").read_text()
+        self.assertIn("PASS Arty A7 post-route timing simulation", transcript)
+        self.assertNotIn("Vivado", transcript)
+
+    def test_timing_simulation_failure_modes_are_rejected(self) -> None:
+        cases = {
+            "timing_missing_pass": "pass marker missing",
+            "timing_missing_marker": "completion marker missing",
+            "timing_missing_sdf": "sdf is missing",
+            "timing_wrong_mode": "did not use timing mode",
+        }
+        for mode, diagnostic in cases.items():
+            with self.subTest(mode=mode):
+                self.assert_timing_failure(diagnostic, FAKE_MODE=mode)
 
     def test_explicit_override_is_authoritative(self) -> None:
         missing = Path(self.tmp.name) / "missing-vivado"

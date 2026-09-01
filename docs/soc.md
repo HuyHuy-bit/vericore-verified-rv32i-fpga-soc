@@ -103,10 +103,11 @@ Vivado 2025.2 is required. An explicit `VIVADO` path is authoritative; otherwise
 ```bash
 make soc-bitstream
 make soc-floorplan
+make soc-post-route-sim
 make soc-program
 ```
 
-The build requires the exact Arty part and top, a 10.000 ns input constraint, one 20.000 ns generated SoC clock, nonnegative WNS, clean DRC, a completion marker, and fresh outputs. It records both clock periods separately and publishes only the bitstream, compact reports, placed-primitive coordinates, and manifest under the ignored build directory. `make soc-floorplan` converts those routed coordinates into the provenance-bound SVG shown in the README. Programming requires a `.bit` file, checks the JTAG-visible FPGA die, waits for the DONE bit, and rejects a missing completion marker.
+The build requires the exact Arty part and top, a 10.000 ns input constraint, one 20.000 ns generated SoC clock, nonnegative WNS, clean DRC, a completion marker, and fresh outputs. It records both clock periods separately and publishes only the bitstream, compact reports, placed-primitive coordinates, and manifest under the ignored build directory. `make soc-floorplan` converts those routed coordinates into the provenance-bound SVG shown in the README. `make soc-post-route-sim` reroutes the board top, generates a timing netlist and SDF, and runs the complete boot banner through XSim with routed delays. Programming requires a `.bit` file, checks the JTAG-visible FPGA die, waits for the DONE bit, and rejects a missing completion marker.
 
 ## Manual reset/button/UART checklist
 

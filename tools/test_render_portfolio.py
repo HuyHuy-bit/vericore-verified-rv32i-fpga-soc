@@ -273,6 +273,7 @@ class SocDocumentationContractTest(unittest.TestCase):
             "make soc-check",
             "make soc-bitstream",
             "make soc-floorplan",
+            "make soc-post-route-sim",
             "make soc-program",
             "not architectural access-fault traps",
             "transmit-only",

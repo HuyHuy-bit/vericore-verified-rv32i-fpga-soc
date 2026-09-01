@@ -34,6 +34,8 @@ SOC_PERIOD_NS = 20.0
 IMAGE_WORDS = 8192
 BUILD_MARKER = "===SOC_BUILD_DONE==="
 PROGRAM_MARKER = "===SOC_PROGRAM_DONE==="
+TIMING_SIM_MARKER = "===SOC_POST_ROUTE_SIM_DONE==="
+TIMING_SIM_PASS = "PASS Arty A7 post-route timing simulation"
 PUBLISHED_FILES = {
     "drc.rpt",
     "manifest.json",
@@ -42,6 +44,7 @@ PUBLISHED_FILES = {
     "timing_summary.rpt",
     "utilization.rpt",
 }
+TIMING_SIM_FILES = {"manifest.json", "transcript.txt"}
 
 
 class BoardError(RuntimeError):
@@ -78,6 +81,7 @@ def create_board_stage(
     parent: Path | None,
     imem: Path,
     dmem: Path,
+    timing_sim: bool = False,
 ) -> tempfile.TemporaryDirectory[str]:
     stage = tempfile.TemporaryDirectory(prefix="rv32i-soc-board-", dir=parent)
     destination = Path(stage.name)
@@ -100,6 +104,17 @@ def create_board_stage(
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+        if timing_sim:
+            for relative in (
+                Path("sim/arty_post_route_tb.sv"),
+                Path("synthesis/soc/post_route_sim.tcl"),
+            ):
+                source = root / relative
+                if not source.is_file():
+                    raise BoardError(f"missing timing simulation input: {source}")
+                target = destination / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
         shutil.copy2(imem, destination / "firmware-imem.hex")
         shutil.copy2(dmem, destination / "firmware-dmem.hex")
     except Exception:
@@ -232,6 +247,66 @@ def validate_output_destination(path: Path) -> None:
         raise BoardError("existing board output has unexpected entries")
 
 
+def validate_timing_sim_destination(path: Path) -> None:
+    if path.is_symlink():
+        raise BoardError(f"timing simulation output cannot be a symbolic link: {path}")
+    if not path.exists():
+        return
+    if not path.is_dir():
+        raise BoardError(f"timing simulation output is not a directory: {path}")
+    children = tuple(path.iterdir())
+    if {entry.name for entry in children} != TIMING_SIM_FILES or any(
+        entry.is_symlink() or not entry.is_file() for entry in children
+    ):
+        raise BoardError("existing timing simulation output has unexpected entries")
+
+
+def read_timing_sim_metadata(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as exc:
+        raise BoardError("post-route simulation metadata is missing") from exc
+    values: dict[str, str] = {}
+    for line in lines:
+        if line.count("=") != 1:
+            raise BoardError("post-route simulation metadata is malformed")
+        key, value = line.split("=", 1)
+        if key in values:
+            raise BoardError(f"post-route simulation metadata duplicates {key}")
+        values[key] = value
+    expected = {
+        "part",
+        "input_clock_period_ns",
+        "soc_clock_period_ns",
+        "wns_ns",
+        "top",
+        "testbench",
+        "mode",
+        "type",
+    }
+    if set(values) != expected:
+        raise BoardError("post-route simulation metadata is malformed")
+    try:
+        input_period = float(values["input_clock_period_ns"])
+        soc_period = float(values["soc_clock_period_ns"])
+        wns = float(values["wns_ns"])
+    except ValueError as exc:
+        raise BoardError("post-route simulation timing metadata is malformed") from exc
+    if values["part"] != PART or values["top"] != "arty_a7_35t_top":
+        raise BoardError("post-route simulation used the wrong design")
+    if values["testbench"] != "arty_post_route_tb":
+        raise BoardError("post-route simulation used the wrong testbench")
+    if values["mode"] != "post-implementation" or values["type"] != "timing":
+        raise BoardError("post-route simulation did not use timing mode")
+    if abs(input_period - INPUT_PERIOD_NS) > 0.0001:
+        raise BoardError("post-route simulation used the wrong input clock")
+    if abs(soc_period - SOC_PERIOD_NS) > 0.0001:
+        raise BoardError("post-route simulation used the wrong SoC clock")
+    if wns < 0.0:
+        raise BoardError("post-route simulation route has negative WNS")
+    return values
+
+
 def run_vivado(
     tool: VivadoTool,
     arguments: tuple[str, ...],
@@ -344,6 +419,132 @@ def run_build(
             raise
 
 
+def run_timing_sim(
+    root: Path,
+    output: Path,
+    imem: Path,
+    dmem: Path,
+    rtl_commit: str | None,
+    timeout: int,
+) -> None:
+    if timeout <= 0:
+        raise BoardError("timeout must be positive")
+    root = root.resolve()
+    validate_timing_sim_destination(output)
+    output = output.resolve()
+    imem = imem.resolve()
+    dmem = dmem.resolve()
+    if output in (Path("/"), root, root / "synthesis", root / "build"):
+        raise BoardError(f"unsafe timing simulation output: {output}")
+    imem_hash = validate_firmware_image(imem)
+    dmem_hash = validate_firmware_image(dmem)
+    source_commit, verified_rtl = source_identity(root, rtl_commit)
+    tool, stage_parent = discover_tool(dict(os.environ))
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    with create_board_stage(
+        root, stage_parent, imem, dmem, timing_sim=True
+    ) as stage_name:
+        stage = Path(stage_name)
+        timing_output = stage / "timing-out"
+        arguments = (
+            "-mode",
+            "batch",
+            "-source",
+            "synthesis/soc/post_route_sim.tcl",
+            "-tclargs",
+            "timing-out",
+            "firmware-imem.hex",
+            "firmware-dmem.hex",
+        )
+        started = time.time()
+        console = run_vivado(tool, arguments, stage, timeout, "post-route simulation")
+        if TIMING_SIM_PASS not in console:
+            raise BoardError("post-route simulation pass marker missing")
+        if TIMING_SIM_MARKER not in console:
+            raise BoardError("post-route simulation completion marker missing")
+        paths = {
+            "metadata": timing_output / "post_route_sim_meta.txt",
+            "timing": timing_output / "timing_summary.rpt",
+            "netlist": timing_output / "arty_a7_35t_top_timesim.v",
+            "sdf": timing_output / "arty_a7_35t_top.sdf",
+        }
+        for name, path in paths.items():
+            if not path.is_file():
+                raise BoardError(f"post-route simulation {name} is missing")
+            if path.stat().st_mtime < started - 1.0:
+                raise BoardError(f"post-route simulation {name} is stale")
+        metadata = read_timing_sim_metadata(paths["metadata"])
+        timing = paths["timing"].read_text(encoding="utf-8", errors="replace")
+        validate_timing_constraints(timing)
+        netlist = paths["netlist"].read_text(encoding="utf-8", errors="replace")
+        if "$sdf_annotate" not in netlist or "arty_a7_35t_top.sdf" not in netlist:
+            raise BoardError("post-route timing netlist lacks SDF annotation")
+        sdf = paths["sdf"].read_text(encoding="utf-8", errors="replace")
+        if "(DELAYFILE" not in sdf or "arty_a7_35t_top" not in sdf:
+            raise BoardError("post-route SDF is malformed")
+
+        publish = Path(tempfile.mkdtemp(prefix=".soc-timing-", dir=output.parent))
+        try:
+            transcript = publish / "transcript.txt"
+            transcript.write_text(
+                "mode=post-implementation\n"
+                "type=timing\n"
+                f"part={PART}\n"
+                f"top={metadata['top']}\n"
+                f"testbench={metadata['testbench']}\n"
+                f"input_clock_period_ns={metadata['input_clock_period_ns']}\n"
+                f"soc_clock_period_ns={metadata['soc_clock_period_ns']}\n"
+                f"wns_ns={metadata['wns_ns']}\n"
+                "uart=rv32i soc ready\\n\n"
+                "led=1\n"
+                f"{TIMING_SIM_PASS}\n",
+                encoding="utf-8",
+            )
+            manifest = {
+                "schema": 1,
+                "status": "complete",
+                "measured_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "source_commit": source_commit,
+                "rtl_commit": verified_rtl,
+                "part": PART,
+                "top": metadata["top"],
+                "testbench": metadata["testbench"],
+                "mode": metadata["mode"],
+                "type": metadata["type"],
+                "input_clock_period_ns": float(metadata["input_clock_period_ns"]),
+                "soc_clock_period_ns": float(metadata["soc_clock_period_ns"]),
+                "wns_ns": float(metadata["wns_ns"]),
+                "firmware": {
+                    "imem_sha256": imem_hash,
+                    "dmem_sha256": dmem_hash,
+                },
+                "vivado": {
+                    "version": tool.version,
+                    "build": tool.build,
+                    "platform": "wsl-windows" if tool.windows else "native",
+                    "launcher": str(tool.launcher),
+                },
+                "invocation": list(arguments),
+                "generated": {
+                    "netlist_sha256": sha256(paths["netlist"]),
+                    "sdf_sha256": sha256(paths["sdf"]),
+                    "timing_sha256": sha256(paths["timing"]),
+                },
+                "transcript_sha256": sha256(transcript),
+            }
+            (publish / "manifest.json").write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            replace_directory(publish, output)
+        except Exception:
+            shutil.rmtree(publish, ignore_errors=True)
+            raise
+
+
 def run_program(root: Path, bitstream: Path, timeout: int) -> None:
     if timeout <= 0:
         raise BoardError("timeout must be positive")
@@ -389,6 +590,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     build.add_argument("--rtl-commit")
     build.add_argument("--timeout", type=int, default=7200)
 
+    timing_sim = subparsers.add_parser("timing-sim")
+    timing_sim.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[2]
+    )
+    timing_sim.add_argument("--imem", type=Path, required=True)
+    timing_sim.add_argument("--dmem", type=Path, required=True)
+    timing_sim.add_argument("--output", type=Path, required=True)
+    timing_sim.add_argument("--rtl-commit")
+    timing_sim.add_argument("--timeout", type=int, default=14400)
+
     program = subparsers.add_parser("program")
     program.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     program.add_argument("--bitstream", type=Path, required=True)
@@ -409,6 +620,16 @@ def main(argv: list[str] | None = None) -> int:
                 args.timeout,
             )
             print(f"board artifacts: {args.output.resolve()}")
+        elif args.command == "timing-sim":
+            run_timing_sim(
+                args.root,
+                args.output,
+                args.imem,
+                args.dmem,
+                args.rtl_commit,
+                args.timeout,
+            )
+            print(f"post-route timing simulation: {args.output.resolve()}")
         else:
             run_program(args.root, args.bitstream, args.timeout)
             print(f"programmed: {args.bitstream.resolve()}")
