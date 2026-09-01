@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from html import escape
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,8 +22,8 @@ class FloorplanRendererTest(unittest.TestCase):
             "bounds\t0\t1000\t0\t800\n"
             "cell\tprimitive\tsite\tbel\ttile\ttile_x\ttile_y\n"
             "soc/u_core/u_backend/u_alu/result_reg[0]\tFDRE\tSLICE_X0Y0\tAFF\tCLBLL_L_X0Y0\t100\t100\n"
-            "soc/u_core/u_frontend/g_icache/u_icache/data_reg[0]\tRAMB18E1\tRAMB18_X0Y0\tRAMB18E1\tBRAM_L_X0Y0\t200\t200\n"
-            "soc/u_core/u_backend/g_dcache/u_dcache/data_reg[0]\tRAMB36E1\tRAMB36_X0Y0\tRAMB36E1\tBRAM_L_X0Y1\t300\t300\n"
+            "soc/u_core/u_frontend/g_icache.u_icache/data_reg[0]\tRAMB18E1\tRAMB18_X0Y0\tRAMB18E1\tBRAM_L_X0Y0\t200\t200\n"
+            "soc/u_core/u_backend/g_dcache.u_dcache/data_reg[0]\tRAMB36E1\tRAMB36_X0Y0\tRAMB36E1\tBRAM_L_X0Y1\t300\t300\n"
             "soc/arbiter/grant_reg\tFDRE\tSLICE_X1Y1\tBFF\tCLBLL_R_X1Y1\t400\t400\n"
             "soc/instruction_memory/mem_reg[0]\tRAMB36E1\tRAMB36_X1Y0\tRAMB36E1\tBRAM_R_X1Y0\t500\t500\n"
             "soc/data_memory/mem_reg[0]\tRAMB36E1\tRAMB36_X2Y0\tRAMB36E1\tBRAM_R_X2Y0\t600\t600\n"
@@ -103,6 +104,21 @@ class FloorplanRendererTest(unittest.TestCase):
             render_floorplan.FloorplanError, "placement hash mismatch"
         ):
             render_floorplan.build_floorplan(self.placement, self.manifest)
+
+    def test_atomic_output_is_publicly_readable(self) -> None:
+        output = self.root / "artifact.svg"
+        render_floorplan.write_atomic(output, b"<svg/>\n")
+        self.assertEqual(os.stat(output).st_mode & 0o777, 0o644)
+
+
+class PublishedFloorplanTest(unittest.TestCase):
+    def test_committed_floorplan_is_bound_to_unchanged_physical_inputs(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        render_floorplan.validate_published(
+            root / "docs/images/soc-floorplan.svg",
+            root / "docs/images/soc-floorplan.json",
+            root,
+        )
 
 
 if __name__ == "__main__":

@@ -247,6 +247,10 @@ class SocDocumentationContractTest(unittest.TestCase):
     def test_readme_links_the_soc_guide_and_labels_the_recording(self) -> None:
         source = self.read("README.md")
         self.assertIn("[Board-ready SoC](docs/soc.md)", source)
+        self.assertIn("![Actual post-route physical placement]", source)
+        self.assertIn("docs/images/soc-floorplan.svg", source)
+        self.assertIn("actual Vivado post-route primitive locations", source)
+        self.assertIn("not a conceptual CPU illustration", source)
         self.assertIn("verification workflow", source)
         self.assertIn("not FPGA board footage", source)
         self.assertIn("make soc-check", source)
@@ -268,6 +272,7 @@ class SocDocumentationContractTest(unittest.TestCase):
             "BTN1",
             "make soc-check",
             "make soc-bitstream",
+            "make soc-floorplan",
             "make soc-program",
             "not architectural access-fault traps",
             "transmit-only",

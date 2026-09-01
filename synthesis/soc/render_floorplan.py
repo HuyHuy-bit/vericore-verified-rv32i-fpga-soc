@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 
@@ -122,9 +123,17 @@ def load_placement(path: Path) -> Placement:
 def classify_cell(cell: str) -> str:
     path = "/" + cell.lower().strip("/") + "/"
     if "/u_core/" in path:
-        if "/u_icache/" in path or "/g_icache/" in path:
+        if (
+            "/u_icache/" in path
+            or "/g_icache/" in path
+            or "g_icache.u_icache" in path
+        ):
             return "icache"
-        if "/u_dcache/" in path or "/g_dcache/" in path:
+        if (
+            "/u_dcache/" in path
+            or "/g_dcache/" in path
+            or "g_dcache.u_dcache" in path
+        ):
             return "dcache"
         return "core"
     if "/instruction_memory/" in path:
@@ -367,12 +376,129 @@ def build_floorplan(
     return svg, metadata
 
 
+def validate_published(svg_path: Path, metadata_path: Path, root: Path) -> None:
+    try:
+        svg = svg_path.read_bytes()
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FloorplanError(f"published floorplan is missing or invalid: {exc}") from exc
+    fields = {
+        "schema",
+        "part",
+        "source_commit",
+        "rtl_commit",
+        "vivado",
+        "input_clock_period_ns",
+        "soc_clock_period_ns",
+        "wns_ns",
+        "placed_primitives",
+        "occupied_tiles",
+        "groups",
+        "placement_sha256",
+        "svg_sha256",
+    }
+    if not isinstance(metadata, dict) or set(metadata) != fields:
+        raise FloorplanError("published floorplan metadata has invalid fields")
+    if metadata["schema"] != 1 or metadata["part"] != PART:
+        raise FloorplanError("published floorplan metadata has an invalid identity")
+    for name in ("source_commit", "rtl_commit"):
+        if not isinstance(metadata[name], str) or SHA_RE.fullmatch(metadata[name]) is None:
+            raise FloorplanError(f"published floorplan {name} is invalid")
+    if not isinstance(metadata["groups"], dict) or set(metadata["groups"]) != set(
+        GROUP_BY_KEY
+    ):
+        raise FloorplanError("published floorplan groups are invalid")
+    group_total = 0
+    for value in metadata["groups"].values():
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise FloorplanError("published floorplan group count is invalid")
+        group_total += value
+    if metadata["placed_primitives"] != group_total:
+        raise FloorplanError("published floorplan primitive count is inconsistent")
+    if (
+        not isinstance(metadata["occupied_tiles"], int)
+        or isinstance(metadata["occupied_tiles"], bool)
+        or not 0 < metadata["occupied_tiles"] <= group_total
+    ):
+        raise FloorplanError("published floorplan tile count is invalid")
+    for name in ("placement_sha256", "svg_sha256"):
+        if not isinstance(metadata[name], str) or re.fullmatch(
+            r"[0-9a-f]{64}", metadata[name]
+        ) is None:
+            raise FloorplanError(f"published floorplan {name} is invalid")
+    if hashlib.sha256(svg).hexdigest() != metadata["svg_sha256"]:
+        raise FloorplanError("published floorplan SVG hash mismatch")
+    source = svg.decode("utf-8")
+    required = (
+        "Post-route physical placement",
+        PART,
+        str(metadata["source_commit"])[:12],
+        str(metadata["rtl_commit"])[:12],
+        "actual routed primitive locations",
+        "not an illustration",
+    )
+    if any(text not in source for text in required):
+        raise FloorplanError("published floorplan SVG lacks provenance")
+    if re.search(r"<script\b|\bhref\s*=", source, re.IGNORECASE):
+        raise FloorplanError("published floorplan SVG contains external behavior")
+    root = root.resolve()
+    source_commit = str(metadata["source_commit"])
+    rtl_commit = str(metadata["rtl_commit"])
+    for commit in (source_commit, rtl_commit):
+        result = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode != 0:
+            raise FloorplanError("published floorplan commit does not exist")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_commit, "HEAD"],
+        cwd=root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if ancestor.returncode != 0:
+        raise FloorplanError("published floorplan source is not an ancestor")
+    recorded_rtl = subprocess.run(
+        ["git", "log", "-1", "--format=%H", source_commit, "--", "rtl"],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if recorded_rtl.returncode != 0:
+        raise FloorplanError("published floorplan RTL identity cannot be resolved")
+    recorded_rtl = recorded_rtl.stdout.strip()
+    if recorded_rtl != rtl_commit:
+        raise FloorplanError("published floorplan RTL identity is inconsistent")
+    unchanged = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--quiet",
+            source_commit,
+            "HEAD",
+            "--",
+            "rtl",
+            "boards",
+            "firmware",
+            "synthesis/soc/build.tcl",
+        ],
+        cwd=root,
+    )
+    if unchanged.returncode != 0:
+        raise FloorplanError("physical design inputs changed after floorplan routing")
+
+
 def write_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
+        os.chmod(temporary, 0o644)
         os.replace(temporary, path)
     except Exception:
         try:

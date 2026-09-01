@@ -95,6 +95,10 @@ The redirect priority is `freeze > trap > mispredict > load-use stall > predict 
 
 The external-memory form of the core is integrated with a fair Wishbone fabric, separate 32 KiB instruction/data BRAMs, a transmit-only UART, four LEDs, and a debounced machine-external interrupt input for the Arty A7-35T. The firmware-level simulator verifies the complete boot message, button bounce rejection, two interrupt responses, LED changes, and continued execution after `MRET`. Physical-board evidence remains unpublished until the guarded Vivado and manual-board procedure produces a validated result record.
 
+![Actual post-route physical placement](docs/images/soc-floorplan.svg)
+
+This floorplan is generated from the actual Vivado post-route primitive locations and RTL hierarchy for this SoC; it is not a conceptual CPU illustration. Its source commit, RTL commit, tool build, timing result, placement hash, and hierarchy counts are recorded in [soc-floorplan.json](docs/images/soc-floorplan.json). Physical board operation remains a separate pending validation.
+
 ```bash
 make soc-check
 make soc-bitstream
