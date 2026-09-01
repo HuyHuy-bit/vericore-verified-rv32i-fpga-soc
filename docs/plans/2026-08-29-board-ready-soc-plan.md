@@ -8,7 +8,7 @@
 
 **Tech Stack:** SystemVerilog, SVA, Verilator 5.048, C++17, freestanding RV32I C/assembly, Python 3.12 standard library, GNU Make, RISC-V GCC/binutils 13.2.0/2.42, Wishbone B4 Classic, Vivado 2025.2, Arty A7-35T.
 
-**Spec:** `docs/designs/2026-08-29-board-ready-soc-design.md`
+**Spec:** `docs/designs/boardReadySoCPlan.md`
 
 ## Global Constraints
 
