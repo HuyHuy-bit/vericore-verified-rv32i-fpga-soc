@@ -1,26 +1,35 @@
 # Board-ready SoC guide
 
+`rv32i_soc` attaches the pipeline core to a small Wishbone fabric with BRAM, UART, and GPIO; `arty_a7_35t_top` wraps that for the Digilent Arty A7-35T. This guide is the contract for that system: what it does, how it is addressed, how it is built, and what has and has not been observed.
+
+Physical-board evidence: not published. The RTL, firmware, simulation, constraints, and guarded Vivado flow are present, but this document does not claim that a bitstream has run on hardware.
+
 ## Board and observable demo
 
 The board target is the Digilent Arty A7-35T (`xc7a35ticsg324-1L`). Its 100 MHz oscillator feeds an Artix-7 MMCM that generates the 50 MHz SoC clock. The freestanding firmware initializes the GPIO interrupt, sets LED0, and transmits `rv32i soc ready` through the board USB-UART connection. BTN0 resets the system. A debounced BTN1 press raises a machine-external interrupt; the handler clears the pending bit, rotates the LED pattern, transmits `external irq`, and returns with `MRET`.
 
-Physical-board evidence: not published. The RTL, firmware, simulation, constraints, and guarded Vivado flow are present, but this document does not claim that a bitstream has run on hardware.
-
 ## System hierarchy
 
 ```text
-arty_a7_35t_top
-├── arty_clock
-├── reset_controller
-└── rv32i_soc
-    ├── rv32i_core
-    ├── instruction and data Wishbone adapters
-    ├── round-robin Wishbone arbiter
-    ├── address-decoding interconnect
-    ├── instruction and data BRAM slaves
-    ├── UART transmitter
-    └── GPIO, debounce, and external-interrupt logic
+arty_a7_35t_top                 rtl/boards/arty_a7_35t_top.sv
+├── arty_clock                  100 MHz board oscillator → 50 MHz SoC clock (MMCM)
+├── reset_controller            BTN0
+└── rv32i_soc                   rtl/soc/rv32i_soc.sv
+    ├── rv32i_core              pipeline, caches, predictor, CSRs, counters
+    ├── wb_master_adapter       i_adapter — instruction client
+    ├── wb_master_adapter       d_adapter — data client
+    ├── wb_arbiter              round-robin between the two masters
+    ├── wb_interconnect         address decode, one latched slave per transaction
+    ├── wb_imem                 32 KiB instruction BRAM
+    ├── wb_dmem                 32 KiB data BRAM
+    ├── wb_uart                 transmit-only UART (`uart_tx`)
+    ├── button_debounce         BTN1 synchronization and debounce
+    └── wb_gpio_irq             LEDs, button state, external-interrupt registers
 ```
+
+![rv32i_soc bus fabric](images/soc_fabric.svg)
+
+The tree gives containment; the diagram gives connectivity. Two masters share one arbitration point and one decode point, every slave hangs off that single decoded transaction, and the GPIO interrupt is the one signal that returns to the core outside the bus.
 
 `rv32i_core` contains the pipeline, caches, predictor, CSRs, and counters. The legacy `cpu` top wraps the same core with the original memory models, preserving directed, compliance, and lockstep verification. `rv32i_soc` attaches the external-memory form to the bus and peripherals. `arty_a7_35t_top` contains the MMCM clock wrapper, board reset, buttons, LEDs, UART pin, and fixed board parameters.
 

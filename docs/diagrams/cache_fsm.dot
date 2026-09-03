@@ -1,26 +1,39 @@
+// D-cache controller state machine (dcache.sv).
+// Deliberately drawn to FSM convention: short state names inside circles,
+// one entry arrow from the reset point, conditions on the transition arcs,
+// state meanings in the caption. Black and white only.
 digraph cache_fsm {
     rankdir=LR;
-    graph [fontname="Helvetica", fontsize=11, bgcolor="white"];
-    node  [fontname="Helvetica", fontsize=10, shape=circle, style=filled, fillcolor="#eef2ff", color="#4338ca", width=1.1];
-    edge  [fontname="Helvetica", fontsize=9, color="#555555"];
+    bgcolor=white;
+    graph [fontname="Helvetica", fontsize=10, nodesep=0.55, ranksep=1.0];
+    node  [fontname="Helvetica", fontsize=11, shape=circle, color=black,
+           fontcolor=black, fixedsize=true, width=0.95];
+    edge  [fontname="Helvetica", fontsize=9, color=black, fontcolor=black,
+           arrowsize=0.7];
 
-    IDLE [fillcolor="#dcfce7", color="#15803d"];
-    WB   [label="WB\n(write back\ndirty victim)"];
-    FILL [label="FILL\n(refill line\nfrom memory)"];
-    FLUSH[label="FLUSH\n(walk all sets,\nwrite back dirty)"];
+    // Reset entry point.
+    reset [shape=point, width=0.07, label=""];
+    reset -> IDLE [label="reset"];
 
-    IDLE -> FILL  [label="miss, line clean\n(load, or store\nwrite-allocate)"];
-    IDLE -> WB    [label="miss, victim dirty\n(write-back only)"];
-    IDLE -> FLUSH [label="flush_req"];
-    WB   -> FILL  [label="writeback done,\nmiss-driven"];
-    WB   -> FLUSH [label="writeback done,\nflush-driven"];
-    FILL -> IDLE  [label="block complete\n(claim line)"];
-    FLUSH -> WB   [label="dirty line found"];
-    FLUSH -> FLUSH [label="advance way/set"];
-    FLUSH -> IDLE [label="all sets walked\n(flush_complete)"];
-    IDLE -> IDLE  [label="hit (write-through:\nmerge resident copy;\nwrite-back: mark dirty)"];
+    IDLE; WB; FILL; FLUSH;
 
-    label = "D-cache FSM (dcache.sv) — write-through skips WB (WRITE_BACK=0 never sets a victim dirty)";
+    IDLE  -> IDLE  [label="hit"];
+    IDLE  -> FILL  [label="miss,\nvictim clean"];
+    IDLE  -> WB    [label="miss,\nvictim dirty"];
+    IDLE  -> FLUSH [label="flush_req"];
+    WB    -> FILL  [label="writeback done,\nmiss-driven"];
+    WB    -> FLUSH [label="writeback done,\nflush-driven"];
+    FILL  -> IDLE  [label="block complete\n(claim line)"];
+    FLUSH -> FLUSH [label="advance\nway/set"];
+    FLUSH -> WB    [label="dirty line\nfound"];
+    FLUSH -> IDLE  [label="all sets walked\n(flush_complete)"];
+
+    label = "\nIDLE  serve hits (write-through: merge resident copy; write-back: mark dirty)\l\
+WB  write back the dirty victim line\l\
+FILL  refill the line from memory\l\
+FLUSH  walk all sets, write back every dirty line\l\
+\nWRITE_BACK=0 never marks a victim dirty, so write-through never enters WB.\l";
     labelloc = "b";
-    fontsize = 10;
+    labeljust = "l";
+    fontsize = 9;
 }
