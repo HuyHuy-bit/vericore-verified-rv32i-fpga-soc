@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0.5 L10,5 L0,9.5 z" fill="#000" style="shape-rendering:geometricPrecision"/>
+    </marker>
+  </defs>
+  <style>
+    rect  { fill:#fff; stroke:#000; stroke-width:1; shape-rendering:crispEdges; }
+    .w    { fill:none; stroke:#000; stroke-width:1; shape-rendering:crispEdges; }
+    .c    { fill:none; stroke:#000; stroke-width:0.8; stroke-dasharray:4 4; shape-rendering:crispEdges; }
+    text  { font-family:Helvetica,Arial,sans-serif; font-size:12px; }
+    .t    { text-anchor:middle; }
+    .s    { font-size:11px; }
+    .h    { font-size:17px; text-anchor:middle; stroke-width:0; }
+    .d    { fill:#000; stroke:none; }
+  </style>
+
+
+  <!-- ================= blocks ================= -->
+  <rect x="30"  y="280" width="28"  height="90"/>
+
+  <rect x="95"  y="295" width="58"  height="60"/>
+
+  <rect x="140" y="88"  width="80"  height="46"/>
+
+  <rect x="560" y="88"  width="92"  height="46"/>
+
+  <rect x="330" y="95"  width="160" height="50"/>
+
+  <rect x="215" y="270" width="130" height="110"/>
+
+  <rect x="470" y="250" width="150" height="170"/>
+
+  <rect x="470" y="470" width="150" height="50"/>
+
+  <rect x="670" y="330" width="26"  height="90"/>
+
+  <rect x="740" y="250" width="110" height="160"/>
+
+  <rect x="920" y="270" width="130" height="130"/>
+
+  <rect x="1090" y="280" width="26" height="90"/>
+
+  <!-- ================= data path ================= -->
+  <!-- PC mux -> PC -> instruction memory -->
+  <polyline class="w" points="58,325 95,325" marker-end="url(#a)"/>
+  <polyline class="w" points="153,325 215,325" marker-end="url(#a)"/>
+
+  <!-- PC -> +4 adder -->
+  <polyline class="w" points="180,325 180,134" marker-end="url(#a)"/>
+  <!-- +4 adder -> PC mux -->
+  <polyline class="w" points="140,111 25,111 25,300 30,300" marker-end="url(#a)"/>
+  <!-- PC -> branch adder -->
+  <polyline class="w" points="180,155 545,155 545,111 560,111" marker-end="url(#a)"/>
+  <!-- branch adder -> PC mux -->
+  <polyline class="w" points="652,111 668,111 668,50 12,50 12,352 30,352" marker-end="url(#a)"/>
+
+  <!-- instruction fan-out -->
+  <polyline class="w" points="345,325 470,325" marker-end="url(#a)"/>
+  <polyline class="w" points="380,285 470,285" marker-end="url(#a)"/>
+  <polyline class="w" points="380,355 470,355" marker-end="url(#a)"/>
+  <polyline class="w" points="380,285 380,145" marker-end="url(#a)"/>
+  <polyline class="w" points="380,355 380,495 470,495" marker-end="url(#a)"/>
+  <circle class="d" cx="380" cy="325" r="2.8"/>
+  <circle class="d" cx="380" cy="285" r="2.8"/>
+  <circle class="d" cx="380" cy="355" r="2.8"/>
+
+  <!-- register file outputs -->
+  <polyline class="w" points="620,285 740,285" marker-end="url(#a)"/>
+  <polyline class="w" points="620,352 670,352" marker-end="url(#a)"/>
+  <!-- rs2 -> data memory write data -->
+  <polyline class="w" points="660,352 660,240 900,240 900,370 920,370" marker-end="url(#a)"/>
+  <circle class="d" cx="660" cy="352" r="2.8"/>
+
+  <!-- imm -> alu mux -->
+  <polyline class="w" points="620,495 640,495 640,398 670,398" marker-end="url(#a)"/>
+  <polyline class="w" points="640,398 640,134" marker-end="url(#a)"/>
+  <circle class="d" cx="640" cy="398" r="2.8"/>
+  <!-- alu mux -> alu -->
+  <polyline class="w" points="696,375 740,375" marker-end="url(#a)"/>
+
+  <!-- alu result -->
+  <polyline class="w" points="850,330 880,330 880,300 920,300" marker-end="url(#a)"/>
+  <polyline class="w" points="880,330 880,225 1080,225 1080,345 1090,345" marker-end="url(#a)"/>
+  <circle class="d" cx="880" cy="300" r="2.8"/>
+
+  <!-- data memory read -> wb mux -->
+  <polyline class="w" points="1050,300 1090,300" marker-end="url(#a)"/>
+
+  <!-- write back -->
+  <polyline class="w" points="1116,325 1150,325 1150,590 440,590 440,395 470,395" marker-end="url(#a)"/>
+
+  <!-- ================= control ================= -->
+  <polyline class="c" points="470,145 470,200 1103,200"/>
+  <polyline class="c" points="545,200 545,250" marker-end="url(#a)"/>
+  <polyline class="c" points="683,200 683,330" marker-end="url(#a)"/>
+  <polyline class="c" points="795,200 795,250" marker-end="url(#a)"/>
+  <polyline class="c" points="985,200 985,270" marker-end="url(#a)"/>
+  <polyline class="c" points="1103,200 1103,280" marker-end="url(#a)"/>
+  <polyline class="c" points="350,145 350,228 44,228 44,280" marker-end="url(#a)"/>
+
+  <!-- ================= labels ================= -->
+  <g class="halo" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round">
+  <text class="h" x="600" y="24">Single-Cycle CPU — Block Diagram</text>
+  <text class="s t" x="600" y="612">solid = data path   ·   dashed = control</text>
+  <text class="s t" x="44" y="315">M</text><text class="s t" x="44" y="329">U</text><text class="s t" x="44" y="343">X</text>
+  <text class="t" x="124" y="330">PC</text>
+  <text class="t" x="180" y="107">Adder</text><text class="s t" x="180" y="123">+4</text>
+  <text class="t" x="606" y="107">Adder</text><text class="s t" x="606" y="123">PC + imm</text>
+  <text class="t" x="410" y="125">Control Unit</text>
+  <text class="t" x="280" y="318">Instruction</text><text class="t" x="280" y="336">Memory</text>
+  <text class="t" x="545" y="326">Register</text><text class="t" x="545" y="344">File</text>
+  <text class="t" x="545" y="500">Imm Gen</text>
+  <text class="s t" x="683" y="365">M</text><text class="s t" x="683" y="379">U</text><text class="s t" x="683" y="393">X</text>
+  <text class="t" x="795" y="335">ALU</text>
+  <text class="t" x="985" y="328">Data</text><text class="t" x="985" y="346">Memory</text>
+  <text class="s t" x="1103" y="315">M</text><text class="s t" x="1103" y="329">U</text><text class="s t" x="1103" y="343">X</text>
+  <text class="s" x="188" y="345">PC</text>
+  <text class="s" x="350" y="318">instruction</text>
+  <text class="s" x="386" y="279">rs1</text>
+  <text class="s" x="386" y="349">rs2 / rd</text>
+  <text class="s" x="386" y="489">imm fields</text>
+  <text class="s" x="626" y="279">read data 1</text>
+  <text class="s" x="626" y="346">read data 2</text>
+  <text class="s" x="616" y="489">imm</text>
+  <text class="s" x="844" y="316">result</text>
+  <text class="s" x="700" y="586">write data</text>
+  <text class="s" x="476" y="389">write data</text>
+  <text class="s" x="770" y="234">write data</text>
+  <text class="s" x="60"  y="222">PCSrc</text>
+  <text class="s t" x="545" y="194">RegWrite</text>
+  <text class="s t" x="683" y="194">ALUSrc</text>
+  <text class="s t" x="800" y="194">ALU op</text>
+  <text class="s t" x="985" y="194">MemRead / MemWrite</text>
+  <text class="s t" x="1103" y="194">MemToReg</text>
+  </g>
+  <g fill="#000" stroke="none">
+  <text class="h" x="600" y="24">Single-Cycle CPU — Block Diagram</text>
+  <text class="s t" x="600" y="612">solid = data path   ·   dashed = control</text>
+  <text class="s t" x="44" y="315">M</text><text class="s t" x="44" y="329">U</text><text class="s t" x="44" y="343">X</text>
+  <text class="t" x="124" y="330">PC</text>
+  <text class="t" x="180" y="107">Adder</text><text class="s t" x="180" y="123">+4</text>
+  <text class="t" x="606" y="107">Adder</text><text class="s t" x="606" y="123">PC + imm</text>
+  <text class="t" x="410" y="125">Control Unit</text>
+  <text class="t" x="280" y="318">Instruction</text><text class="t" x="280" y="336">Memory</text>
+  <text class="t" x="545" y="326">Register</text><text class="t" x="545" y="344">File</text>
+  <text class="t" x="545" y="500">Imm Gen</text>
+  <text class="s t" x="683" y="365">M</text><text class="s t" x="683" y="379">U</text><text class="s t" x="683" y="393">X</text>
+  <text class="t" x="795" y="335">ALU</text>
+  <text class="t" x="985" y="328">Data</text><text class="t" x="985" y="346">Memory</text>
+  <text class="s t" x="1103" y="315">M</text><text class="s t" x="1103" y="329">U</text><text class="s t" x="1103" y="343">X</text>
+  <text class="s" x="188" y="345">PC</text>
+  <text class="s" x="350" y="318">instruction</text>
+  <text class="s" x="386" y="279">rs1</text>
+  <text class="s" x="386" y="349">rs2 / rd</text>
+  <text class="s" x="386" y="489">imm fields</text>
+  <text class="s" x="626" y="279">read data 1</text>
+  <text class="s" x="626" y="346">read data 2</text>
+  <text class="s" x="616" y="489">imm</text>
+  <text class="s" x="844" y="316">result</text>
+  <text class="s" x="700" y="586">write data</text>
+  <text class="s" x="476" y="389">write data</text>
+  <text class="s" x="770" y="234">write data</text>
+  <text class="s" x="60"  y="222">PCSrc</text>
+  <text class="s t" x="545" y="194">RegWrite</text>
+  <text class="s t" x="683" y="194">ALUSrc</text>
+  <text class="s t" x="800" y="194">ALU op</text>
+  <text class="s t" x="985" y="194">MemRead / MemWrite</text>
+  <text class="s t" x="1103" y="194">MemToReg</text>
+  </g>
+</svg>
