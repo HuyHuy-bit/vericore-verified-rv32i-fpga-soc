@@ -14,8 +14,7 @@ A synthesis-tested 5-stage RISC-V core with caches, precise traps, and retiremen
 ![Five-stage datapath with forwarding, prediction, caches, and commit control](docs/images/datapath.svg)
 
 <!-- portfolio:status:start -->
-Current measurements — validated for the checked-out RTL.
-Historical synthesis — the implementation table was measured for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet resynthesised.
+Measurement
 <!-- portfolio:status:end -->
 
 <!-- portfolio:soc:start -->
