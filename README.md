@@ -1,10 +1,10 @@
-# RV32I Pipelined CPU
+# VeriCore — Verified RV32I FPGA SoC
 
 A synthesis-tested 5-stage RISC-V core with caches, precise traps, and retirement-level verification.
 
-[![RTL Tests](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/rtl-tests.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/rtl-tests.yml)
-[![RISC-V Compliance Suite](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/compliance.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/compliance.yml)
-[![Spike Lockstep](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/lockstep.yml/badge.svg)](https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath/actions/workflows/lockstep.yml)
+[![RTL Tests](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/rtl-tests.yml/badge.svg)](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/rtl-tests.yml)
+[![RISC-V Compliance Suite](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/compliance.yml/badge.svg)](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/compliance.yml)
+[![Spike Lockstep](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/lockstep.yml/badge.svg)](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/lockstep.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 This repository implements `RV32I_Zicsr_Zifencei` in SystemVerilog with forwarding, branch prediction, M-mode traps and interrupts, and parameterized instruction/data caches. Verification combines directed tests, exhaustive decode and hazard units, pinned RISC-V architecture tests, and instruction-by-instruction Spike comparison. Results are generated from machine-readable records and bound to exact tool and source revisions.
@@ -115,8 +115,8 @@ See the [Board-ready SoC](docs/soc.md) guide for the memory map, bus contract, f
 Docker is the only host requirement for the pinned open-source verification path.
 
 ```bash
-git clone https://github.com/HuyHuy-bit/5-stage-pipeline-rv32i-datapath.git
-cd 5-stage-pipeline-rv32i-datapath
+git clone https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc.git
+cd vericore-verified-rv32i-fpga-soc
 make verify
 make portfolio-check
 ```
