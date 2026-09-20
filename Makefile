@@ -169,6 +169,7 @@ soc-unit:
 	@for name in $(SOC_UNIT_NAMES); do tools/run_unit.sh "$$name"; done
 
 $(SOC_SIM): $(SOC_SRCS) sim/soc_tb.cpp
+	@python3 tools/build_environment.py prepare --build-dir "$(SOC_SIM_DIR)" --identity "$(BUILD_ENV_ID)"
 	verilator --cc --exe --build --assert --timing -j 0 \
 		--Mdir "$(SOC_SIM_DIR)" --top-module rv32i_soc \
 		-GCLOCK_HZ=80 -GUART_BAUD=10 -GDEBOUNCE_CYCLES=4 \
