@@ -14,7 +14,8 @@ A synthesis-tested 5-stage RISC-V core with caches, precise traps, and retiremen
 ![Five-stage datapath with forwarding, prediction, caches, and commit control](docs/images/datapath.svg)
 
 <!-- portfolio:status:start -->
-Measurement
+Current measurements — validated for the checked-out RTL.
+Historical synthesis — the implementation table was measured for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet resynthesised.
 <!-- portfolio:status:end -->
 
 <!-- portfolio:soc:start -->
@@ -171,7 +172,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 
 ## References
 
-- [Architecture](docs/architecture.md) · [Board-ready SoC](docs/soc.md) · [Verification plan](docs/verification.md) · [Evidence ledger](docs/evidence.md) · [Result format](results/FORMAT.md)
+- [Architecture](docs/architecture.md) · [Measured studies](docs/studies.md) · [Board-ready SoC](docs/soc.md) · [Verification plan](docs/verification.md) · [Evidence ledger](docs/evidence.md) · [Result format](results/FORMAT.md)
 - [RISC-V unprivileged ISA](https://docs.riscv.org/reference/isa/unpriv/rv32.html) · [machine-level ISA](https://docs.riscv.org/reference/isa/priv/machine.html)
 
 Licensed under the [MIT License](LICENSE).
