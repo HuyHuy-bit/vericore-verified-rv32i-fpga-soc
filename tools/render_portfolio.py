@@ -10,11 +10,13 @@ import tempfile
 
 if __package__:
     from .results import (
-        ResultSet, evidence_state, load_json, load_result_set, validate_result_set,
+        ResultSet, evidence_state, load_json, load_result_set, synthesis_commits,
+        validate_result_set,
     )
 else:
     from results import (
-        ResultSet, evidence_state, load_json, load_result_set, validate_result_set,
+        ResultSet, evidence_state, load_json, load_result_set, synthesis_commits,
+        validate_result_set,
     )
 
 
@@ -141,7 +143,7 @@ def verification_table(result: ResultSet) -> str:
     ))
 
 
-def facts(result: ResultSet, state: str) -> str:
+def facts(result: ResultSet, state: str, synthesis_state: str) -> str:
     value = result.verification
     assertions = value["assertions"]["concurrent"] + value["assertions"]["immediate"]
     matrix = ",".join(item["name"] for item in value["memory_configurations"])
@@ -156,6 +158,7 @@ def facts(result: ResultSet, state: str) -> str:
         f"EVIDENCE_FACT TRACKED_COVERAGE_TOTAL={value['cover_points']['source']}",
         f"EVIDENCE_FACT TRACKED_COVERAGE_STATUS={state}",
         f"EVIDENCE_FACT EVIDENCE_STATUS={state}",
+        f"EVIDENCE_FACT SYNTHESIS_STATUS={synthesis_state}",
         f"EVIDENCE_FACT CI_CONFIGS={len(value['memory_configurations'])}",
         f"EVIDENCE_FACT CI_MATRIX={matrix}",
         f"EVIDENCE_FACT ARCH_TEST_SHA={result.tool_versions['architecture_test_commit']}",
@@ -166,13 +169,25 @@ def facts(result: ResultSet, state: str) -> str:
     return f"<!-- evidence-facts:begin -->\n{rows}\n<!-- evidence-facts:end -->"
 
 
-def evidence_notice(result: ResultSet, state: str) -> str:
+def evidence_notice(result: ResultSet, state: str, synthesis_state: str) -> str:
     if state == "current":
-        return "Current measurements — validated for the checked-out RTL."
-    return (
-        "Historical measurements — validated for RTL "
-        f"{result.manifest['rtl_commit']}; current RTL changes are not yet remeasured."
-    )
+        lines = ["Current measurements — validated for the checked-out RTL."]
+    else:
+        lines = [
+            "Historical measurements — validated for RTL "
+            f"{result.manifest['rtl_commit']}; current RTL changes are not yet remeasured."
+        ]
+    # Synthesis needs Vivado, so the implementation table can lag the
+    # open-source evidence. Say so separately rather than letting one status
+    # speak for measurements taken at two different commits.
+    if synthesis_state == "historical":
+        commits = synthesis_commits(result)
+        measured = commits[1] if commits else result.manifest["rtl_commit"]
+        lines.append(
+            "Historical synthesis — the implementation table was measured for RTL "
+            f"{measured}; current RTL changes are not yet resynthesised."
+        )
+    return "\n".join(lines)
 
 
 def provenance(result: ResultSet) -> str:
@@ -252,7 +267,7 @@ def summary(result: ResultSet) -> str:
     )
 
 
-def block_contents(result: ResultSet, state: str) -> dict[str, str]:
+def block_contents(result: ResultSet, state: str, synthesis_state: str) -> dict[str, str]:
     return {
         "overview": evidence_overview(result),
         "snapshot": snapshot(result),
@@ -260,8 +275,8 @@ def block_contents(result: ResultSet, state: str) -> dict[str, str]:
         "benchmarks": benchmark_table(result),
         "synthesis": synthesis_table(result),
         "synthesis-hashes": synthesis_hashes(result),
-        "facts": facts(result, state),
-        "status": evidence_notice(result, state),
+        "facts": facts(result, state, synthesis_state),
+        "status": evidence_notice(result, state, synthesis_state),
         "provenance": provenance(result),
         "summary": summary(result),
         "soc": soc_status(result.root),
@@ -271,7 +286,11 @@ def block_contents(result: ResultSet, state: str) -> dict[str, str]:
 def render_documents(root: Path, result_set: ResultSet) -> dict[Path, str]:
     root = root.resolve()
     state = evidence_state(root, result_set.manifest["rtl_commit"])
-    contents = block_contents(result_set, state)
+    # Disagreeing rows are validate_provenance's error, not the renderer's.
+    synthesis = synthesis_commits(result_set)
+    synthesis_rtl = synthesis[1] if synthesis else result_set.manifest["rtl_commit"]
+    synthesis_state = evidence_state(root, synthesis_rtl)
+    contents = block_contents(result_set, state, synthesis_state)
     rendered: dict[Path, str] = {}
     for relative, names in DOCUMENT_BLOCKS.items():
         path = root / relative

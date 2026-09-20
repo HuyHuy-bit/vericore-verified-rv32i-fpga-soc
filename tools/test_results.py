@@ -20,6 +20,7 @@ from tools.results import (
     collect_open,
     coverage_counts,
     load_result_set,
+    synthesis_commits,
     validate_result_set,
     write_profile_receipt,
     write_verification_receipt,
@@ -299,6 +300,30 @@ class ResultSetTest(unittest.TestCase):
         self.assertEqual(len(loaded.benchmarks), 20)
         self.assertEqual(len(loaded.synthesis), 4)
         self.assertEqual(validate_result_set(self.results, self.checkout), [])
+
+    def test_synthesis_rows_may_lag_the_published_rtl(self) -> None:
+        # Vivado is not in the pinned open-source toolchain, so the
+        # implementation table can legitimately describe an older commit than
+        # the functional evidence published alongside it.
+        older = "c" * 40
+        rows = self.synthesis_rows()
+        for row in rows:
+            row["tooling_commit"] = older
+            row["rtl_commit"] = older
+        self.write_csv("synthesis.csv", SYNTHESIS_FIELDS, rows)
+        self.refresh_manifest()
+        self.assertEqual(validate_result_set(self.results, self.checkout), [])
+        self.assertEqual(synthesis_commits(load_result_set(self.results)), (older, older))
+
+    def test_synthesis_rows_must_agree_with_each_other(self) -> None:
+        rows = self.synthesis_rows()
+        rows[0]["rtl_commit"] = "c" * 40
+        self.write_csv("synthesis.csv", SYNTHESIS_FIELDS, rows)
+        self.refresh_manifest()
+        self.assertIn(
+            "synthesis rows disagree on the measured commit",
+            validate_result_set(self.results, self.checkout),
+        )
 
     def test_historical_rtl_uses_recorded_source_counts(self) -> None:
         rtl = self.checkout / "rtl/core.sv"

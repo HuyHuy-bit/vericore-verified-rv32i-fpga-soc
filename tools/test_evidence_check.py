@@ -333,6 +333,7 @@ class EvidenceContractTest(unittest.TestCase):
             "TRACKED_COVERAGE_TOTAL": "2",
             "TRACKED_COVERAGE_STATUS": "current",
             "EVIDENCE_STATUS": "current",
+            "SYNTHESIS_STATUS": "current",
             "CI_CONFIGS": "6",
             "CI_MATRIX": ",".join(name for name, _ in self.MATRIX),
             "ARCH_TEST_SHA": self.ARCH_SHA,

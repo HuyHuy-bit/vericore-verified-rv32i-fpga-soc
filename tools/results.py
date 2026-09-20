@@ -664,6 +664,26 @@ def validate_tools(result: ResultSet, checkout: Path, errors: list[str]) -> None
     exact_fields(value["vivado"], {"version", "build", "platform"}, "Vivado", errors)
 
 
+def synthesis_commits(result: ResultSet) -> tuple[str, str] | None:
+    """The (tooling, RTL) commit pair every synthesis row was measured at.
+
+    Returns None when the rows disagree, which is a provenance error rather
+    than a lagging table.
+    """
+    stamped = [
+        row for row in result.synthesis
+        if "tooling_commit" in row and "rtl_commit" in row
+    ]
+    if len(stamped) != len(result.synthesis):
+        return None
+    pairs = {
+        (str(row["tooling_commit"]), str(row["rtl_commit"])) for row in stamped
+    }
+    if len(pairs) != 1:
+        return None
+    return next(iter(pairs))
+
+
 def validate_provenance(result: ResultSet, checkout: Path, errors: list[str]) -> None:
     tooling = result.manifest.get("tooling_commit")
     rtl = result.manifest.get("rtl_commit")
@@ -672,14 +692,27 @@ def validate_provenance(result: ResultSet, checkout: Path, errors: list[str]) ->
         ("tool_versions", result.tool_versions.get("tooling_commit"), result.tool_versions.get("rtl_commit")),
     ]
     sources.extend((f"benchmark row {index}", row["tooling_commit"], row["rtl_commit"]) for index, row in enumerate(result.benchmarks, 2))
-    sources.extend((f"synthesis row {index}", row["tooling_commit"], row["rtl_commit"]) for index, row in enumerate(result.synthesis, 2))
     for label, row_tooling, row_rtl in sources:
         if row_tooling != tooling:
             errors.append(f"{label} tooling commit differs from manifest")
         if row_rtl != rtl:
             errors.append(f"{label} RTL commit differs from manifest")
+    # Synthesis rows carry their own provenance. Vivado is proprietary and is
+    # often unavailable when the open-source evidence is remeasured, so the
+    # implementation table legitimately lags the functional results. It must
+    # still be one self-consistent measurement of an ancestor of the published
+    # RTL, so it can never describe code that does not precede this set.
+    synthesis = synthesis_commits(result)
+    if result.synthesis and synthesis is None:
+        errors.append("synthesis rows disagree on the measured commit")
+    probes = [("tooling", tooling), ("RTL", rtl)]
+    if synthesis is not None:
+        probes.extend(
+            (("synthesis tooling", synthesis[0]), ("synthesis RTL", synthesis[1]))
+        )
     if (checkout / ".git").exists():
-        for label, commit in (("tooling", tooling), ("RTL", rtl)):
+        missing = set()
+        for label, commit in probes:
             probe = subprocess.run(
                 ["git", "-C", str(checkout), "cat-file", "-e", f"{commit}^{{commit}}"],
                 stdout=subprocess.DEVNULL,
@@ -687,6 +720,24 @@ def validate_provenance(result: ResultSet, checkout: Path, errors: list[str]) ->
             )
             if probe.returncode != 0:
                 errors.append(f"{label} commit does not exist in this checkout")
+                missing.add(commit)
+        if (
+            synthesis is not None
+            and synthesis[1] != rtl
+            and not missing & {synthesis[1], rtl}
+        ):
+            ancestry = subprocess.run(
+                [
+                    "git", "-C", str(checkout), "merge-base",
+                    "--is-ancestor", str(synthesis[1]), str(rtl),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if ancestry.returncode != 0:
+                errors.append(
+                    "synthesis RTL commit is not an ancestor of the published RTL commit"
+                )
 
 
 def validate_soc_fields(

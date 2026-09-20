@@ -33,6 +33,7 @@ FACT_KEYS = (
     "TRACKED_COVERAGE_TOTAL",
     "TRACKED_COVERAGE_STATUS",
     "EVIDENCE_STATUS",
+    "SYNTHESIS_STATUS",
     "CI_CONFIGS",
     "CI_MATRIX",
     "ARCH_TEST_SHA",
@@ -1337,6 +1338,30 @@ def published_evidence(
         raise ContractError(f"cannot derive published evidence state: {exc}") from exc
 
 
+def published_synthesis(root: Path) -> tuple[str, str | None]:
+    """Status of the synthesis rows, derived from their own measured commit.
+
+    Kept separate from published_evidence because Vivado is not part of the
+    pinned open-source toolchain: the functional evidence can be remeasured at
+    HEAD while the implementation table still describes an older commit.
+    """
+    result_root = root / "results"
+    present = {name for name in RESULT_RECORDS if (result_root / name).is_file()}
+    if present != set(RESULT_RECORDS):
+        return "current", None
+    try:
+        if __package__:
+            from .results import evidence_state, load_result_set, synthesis_commits
+        else:
+            from results import evidence_state, load_result_set, synthesis_commits
+        result = load_result_set(result_root)
+        commits = synthesis_commits(result)
+        measured = commits[1] if commits else result.manifest["rtl_commit"]
+        return evidence_state(root, measured), measured
+    except (KeyError, OSError, ValueError) as exc:
+        raise ContractError(f"cannot derive published synthesis state: {exc}") from exc
+
+
 def check_repository_evidence(root: Path) -> None:
     versions = parse_reference_versions(root)
     check_build_surface(root)
@@ -1346,6 +1371,7 @@ def check_repository_evidence(root: Path) -> None:
         root, (concurrent, immediate, covers)
     )
     concurrent, immediate, covers = source_counts
+    synthesis_status, synthesis_rtl = published_synthesis(root)
     hit, coverage_total, coverage_status = coverage_facts(root)
     if coverage_status != evidence_status:
         raise ContractError(
@@ -1373,6 +1399,7 @@ def check_repository_evidence(root: Path) -> None:
         "TRACKED_COVERAGE_TOTAL": str(coverage_total),
         "TRACKED_COVERAGE_STATUS": coverage_status,
         "EVIDENCE_STATUS": evidence_status,
+        "SYNTHESIS_STATUS": synthesis_status,
         "CI_CONFIGS": str(len(matrix)),
         "CI_MATRIX": ",".join(name for name, _ in matrix),
         "ARCH_TEST_SHA": versions["ARCH_TEST_SHA"],
@@ -1389,6 +1416,14 @@ def check_repository_evidence(root: Path) -> None:
         for relative in FACT_DOCUMENTS:
             if (root / relative).read_text(encoding="utf-8").count(notice) != 1:
                 raise ContractError(f"{relative}: missing historical measurement notice")
+    if synthesis_status == "historical":
+        synthesis_notice = (
+            "Historical synthesis — the implementation table was measured for RTL "
+            f"{synthesis_rtl}; current RTL changes are not yet resynthesised."
+        )
+        for relative in FACT_DOCUMENTS:
+            if (root / relative).read_text(encoding="utf-8").count(synthesis_notice) != 1:
+                raise ContractError(f"{relative}: missing historical synthesis notice")
     for key in FACT_KEYS:
         values = {relative: facts[key] for relative, facts in documents.items()}
         if len(set(values.values())) != 1:
