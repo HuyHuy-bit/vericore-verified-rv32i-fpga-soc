@@ -9,14 +9,14 @@ What's tested, by what mechanism, and what's explicitly not tested yet.
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
-EVIDENCE_FACT ASSERTIONS_TOTAL=27
-EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
-EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
+EVIDENCE_FACT ASSERTIONS_TOTAL=66
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=63
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=3
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
 EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
 EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
-EVIDENCE_FACT EVIDENCE_STATUS=historical
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
+EVIDENCE_FACT EVIDENCE_STATUS=current
 EVIDENCE_FACT SYNTHESIS_STATUS=historical
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
@@ -30,7 +30,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 </details>
 
 <!-- portfolio:status:start -->
-Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
+Current measurements — validated for the checked-out RTL.
 Historical synthesis — the implementation table was measured for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet resynthesised.
 <!-- portfolio:status:end -->
 

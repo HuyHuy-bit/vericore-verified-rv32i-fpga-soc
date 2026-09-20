@@ -1,9 +1,9 @@
 # Evidence ledger
 
 <!-- portfolio:overview:start -->
-This ledger separates source-derived facts, pinned external inputs, current measurements, and historical design studies. Open-source gates were measured at `2026-08-29T05:23:30Z`; the compact result set was published at `2026-08-29T05:56:10Z`; Vivado manifests record `2026-08-29`. The tooling commit is `b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359`, and the frozen RTL baseline is `e55cf402670481413c910c2f2a51617ed53342a5`.
+This ledger separates source-derived facts, pinned external inputs, current measurements, and historical design studies. Open-source gates were measured at `2026-09-20T18:34:46Z`; the compact result set was published at `2026-09-20T18:35:53Z`; Vivado manifests record `2026-08-29`. The tooling commit is `21df7609ef9dc746ded58762ac2d03471a291eb5`, and the frozen RTL baseline is `d21ecd3fe310bf49c505220c134f8cfd205c90e5`.
 
-The pinned environment is Ubuntu 24.04 in `ghcr.io/huyhuy-bit/rv32i-verify:1` (`sha256:45fa6be40bdfce85a4aa8dfde1b67f3c9433e42b2fd0e759ae57f3c4ffcb1df8`), Verilator 5.048, Python 3.12, RISC-V GCC 13.2.0-2024.04.12 with assembler 2.42, Spike `55b4658dbf574ba0b714083ec436ce2cb5be1998`, architecture tests `6f7f47bdc61c0c51c0cbf75789678a1235eeefc2`, and Vivado 2025.2 build 6299465.
+The pinned environment is Ubuntu 24.04 in `ghcr.io/huyhuy-bit/rv32i-verify:1` (`sha256:1edaf9f599344d2ebb735f3fc18d940241e5b8cf9fb341becc8000f505ab070d`), Verilator 5.048, Python 3.12, RISC-V GCC 13.2.0-2024.04.12 with assembler 2.42, Spike `55b4658dbf574ba0b714083ec436ce2cb5be1998`, architecture tests `6f7f47bdc61c0c51c0cbf75789678a1235eeefc2`, and Vivado 2025.2 build 6299465.
 <!-- portfolio:overview:end -->
 
 ## Machine-checked facts
@@ -12,14 +12,14 @@ The pinned environment is Ubuntu 24.04 in `ghcr.io/huyhuy-bit/rv32i-verify:1` (`
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
-EVIDENCE_FACT ASSERTIONS_TOTAL=27
-EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
-EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
+EVIDENCE_FACT ASSERTIONS_TOTAL=66
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=63
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=3
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
 EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
 EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
-EVIDENCE_FACT EVIDENCE_STATUS=historical
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
+EVIDENCE_FACT EVIDENCE_STATUS=current
 EVIDENCE_FACT SYNTHESIS_STATUS=historical
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
@@ -35,7 +35,7 @@ assertions and covers, workflow matrix and seed command, coverage report, and
 central reference metadata by `make evidence-check`.
 
 <!-- portfolio:status:start -->
-Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
+Current measurements — validated for the checked-out RTL.
 Historical synthesis — the implementation table was measured for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet resynthesised.
 <!-- portfolio:status:end -->
 
@@ -77,11 +77,11 @@ exact simulator built for the listed parameters.
 <!-- portfolio:benchmarks:start -->
 | Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
 |---|---:|---:|---:|---:|
-| crc32 | 758,160 / 10.28041 | 170,189 / 2.30771 | 152,285 / 2.06494 | 75,816 / 1.02804 |
-| matmul | 3,504,148 / 11.37629 | 790,915 / 2.56772 | 712,507 / 2.31317 | 361,402 / 1.17330 |
-| sort | 2,521,060 / 12.48334 | 1,038,506 / 5.14229 | 504,874 / 2.49995 | 252,106 / 1.24833 |
-| llist | 932,270 / 10.00236 | 465,099 / 4.99006 | 188,643 / 2.02396 | 93,227 / 1.00024 |
-| interp | 14,652,250 / 11.69906 | 4,443,716 / 3.54808 | 2,933,372 / 2.34214 | 1,467,250 / 1.17152 |
+| crc32 | 758,160 / 10.28041 | 151,765 / 2.05789 | 152,021 / 2.06136 | 75,816 / 1.02804 |
+| matmul | 3,504,148 / 11.37629 | 710,907 / 2.30797 | 711,691 / 2.31052 | 361,402 / 1.17330 |
+| sort | 2,227,300 / 11.02875 | 471,714 / 2.33575 | 504,610 / 2.49864 | 252,106 / 1.24833 |
+| llist | 932,270 / 10.00236 | 186,587 / 2.00190 | 187,611 / 2.01289 | 93,227 / 1.00024 |
+| interp | 14,652,250 / 11.69906 | 2,932,916 / 2.34178 | 2,933,124 / 2.34195 | 1,467,250 / 1.17152 |
 <!-- portfolio:benchmarks:end -->
 
 Commands were `make bench IMEM_LAT=10 DMEM_LAT=10`; the same with
@@ -116,9 +116,9 @@ The SHA-256 pairs below are `utilization.rpt` / `timing_summary.rpt`:
 <!-- portfolio:synthesis-hashes:end -->
 
 <!-- portfolio:provenance:start -->
-- Measurement timestamp: `2026-08-29T05:56:10Z`
-- Tooling commit: `b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359`
-- Frozen RTL commit: `e55cf402670481413c910c2f2a51617ed53342a5`
+- Measurement timestamp: `2026-09-20T18:35:53Z`
+- Tooling commit: `21df7609ef9dc746ded58762ac2d03471a291eb5`
+- Frozen RTL commit: `d21ecd3fe310bf49c505220c134f8cfd205c90e5`
 - Canonical container: `ghcr.io/huyhuy-bit/rv32i-verify:1`
 - Open tools: Ubuntu 24.04; Verilator 5.048; RISC-V GCC 13.2.0-2024.04.12; RISC-V assembler 2.42; Python 3.12
 - Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-29

@@ -3,7 +3,7 @@
   "architecture_test_expected": 38,
   "container": {
     "base": "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
-    "digest": "sha256:45fa6be40bdfce85a4aa8dfde1b67f3c9433e42b2fd0e759ae57f3c4ffcb1df8",
+    "digest": "sha256:1edaf9f599344d2ebb735f3fc18d940241e5b8cf9fb341becc8000f505ab070d",
     "image": "ghcr.io/huyhuy-bit/rv32i-verify",
     "revision": 1
   },
@@ -11,10 +11,10 @@
   "python": "3.12",
   "riscv_as": "2.42",
   "riscv_gcc": "13.2.0-2024.04.12",
-  "rtl_commit": "e55cf402670481413c910c2f2a51617ed53342a5",
+  "rtl_commit": "d21ecd3fe310bf49c505220c134f8cfd205c90e5",
   "schema": 1,
   "spike_commit": "55b4658dbf574ba0b714083ec436ce2cb5be1998",
-  "tooling_commit": "b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359",
+  "tooling_commit": "21df7609ef9dc746ded58762ac2d03471a291eb5",
   "ubuntu": "24.04",
   "verilator": "5.048",
   "vhs": "0.11.0",

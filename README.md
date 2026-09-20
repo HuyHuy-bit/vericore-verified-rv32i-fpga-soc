@@ -16,14 +16,14 @@ This repository implements `RV32I_Zicsr_Zifencei` in SystemVerilog with forwardi
 <!-- evidence-facts:begin -->
 EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
 EVIDENCE_FACT DIRECTED_TESTS=25
-EVIDENCE_FACT ASSERTIONS_TOTAL=27
-EVIDENCE_FACT ASSERTIONS_CONCURRENT=25
-EVIDENCE_FACT ASSERTIONS_IMMEDIATE=2
+EVIDENCE_FACT ASSERTIONS_TOTAL=66
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=63
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=3
 EVIDENCE_FACT SOURCE_COVER_POINTS=44
 EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
 EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=historical
-EVIDENCE_FACT EVIDENCE_STATUS=historical
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
+EVIDENCE_FACT EVIDENCE_STATUS=current
 EVIDENCE_FACT SYNTHESIS_STATUS=historical
 EVIDENCE_FACT CI_CONFIGS=6
 EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
@@ -37,7 +37,7 @@ EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
 </details>
 
 <!-- portfolio:status:start -->
-Historical measurements — validated for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet remeasured.
+Current measurements — validated for the checked-out RTL.
 Historical synthesis — the implementation table was measured for RTL e55cf402670481413c910c2f2a51617ed53342a5; current RTL changes are not yet resynthesised.
 <!-- portfolio:status:end -->
 
@@ -48,7 +48,7 @@ Physical-board evidence: not published
 ## Portfolio snapshot
 
 <!-- portfolio:snapshot:start -->
-> **Portfolio Snapshot** — 5-stage `RV32I_Zicsr_Zifencei` • 25 directed tests × 6 memory configurations • 3 predictor configurations • 38/38 architecture signatures • 38/38 Spike lockstep • 200/200 random Spike seeds • 27 assertions • 44/44 functional cover points • 70.6–76.3 MHz routed Artix-7 implementations
+> **Portfolio Snapshot** — 5-stage `RV32I_Zicsr_Zifencei` • 25 directed tests × 6 memory configurations • 3 predictor configurations • 38/38 architecture signatures • 38/38 Spike lockstep • 200/200 random Spike seeds • 66 assertions • 44/44 functional cover points • 70.6–76.3 MHz routed Artix-7 implementations
 <!-- portfolio:snapshot:end -->
 
 <!-- portfolio:verification:start -->
@@ -164,11 +164,11 @@ The tables below are generated from committed records. Benchmark entries are `cy
 <!-- portfolio:benchmarks:start -->
 | Kernel | 10-cycle uncached | +1KB 4-way I$ | +4KB 4-way WB D$ | 1-cycle uncached |
 |---|---:|---:|---:|---:|
-| crc32 | 758,160 / 10.28041 | 170,189 / 2.30771 | 152,285 / 2.06494 | 75,816 / 1.02804 |
-| matmul | 3,504,148 / 11.37629 | 790,915 / 2.56772 | 712,507 / 2.31317 | 361,402 / 1.17330 |
-| sort | 2,521,060 / 12.48334 | 1,038,506 / 5.14229 | 504,874 / 2.49995 | 252,106 / 1.24833 |
-| llist | 932,270 / 10.00236 | 465,099 / 4.99006 | 188,643 / 2.02396 | 93,227 / 1.00024 |
-| interp | 14,652,250 / 11.69906 | 4,443,716 / 3.54808 | 2,933,372 / 2.34214 | 1,467,250 / 1.17152 |
+| crc32 | 758,160 / 10.28041 | 151,765 / 2.05789 | 152,021 / 2.06136 | 75,816 / 1.02804 |
+| matmul | 3,504,148 / 11.37629 | 710,907 / 2.30797 | 711,691 / 2.31052 | 361,402 / 1.17330 |
+| sort | 2,227,300 / 11.02875 | 471,714 / 2.33575 | 504,610 / 2.49864 | 252,106 / 1.24833 |
+| llist | 932,270 / 10.00236 | 186,587 / 2.00190 | 187,611 / 2.01289 | 93,227 / 1.00024 |
+| interp | 14,652,250 / 11.69906 | 2,932,916 / 2.34178 | 2,933,124 / 2.34195 | 1,467,250 / 1.17152 |
 <!-- portfolio:benchmarks:end -->
 
 </details>
@@ -202,9 +202,9 @@ The deeper rationale—including cache inference experiments, exception ordering
 <summary>Measurement provenance</summary>
 
 <!-- portfolio:provenance:start -->
-- Measurement timestamp: `2026-08-29T05:56:10Z`
-- Tooling commit: `b8217e0294c26f14abd1cdb3f4e7b6d9fee3d359`
-- Frozen RTL commit: `e55cf402670481413c910c2f2a51617ed53342a5`
+- Measurement timestamp: `2026-09-20T18:35:53Z`
+- Tooling commit: `21df7609ef9dc746ded58762ac2d03471a291eb5`
+- Frozen RTL commit: `d21ecd3fe310bf49c505220c134f8cfd205c90e5`
 - Canonical container: `ghcr.io/huyhuy-bit/rv32i-verify:1`
 - Open tools: Ubuntu 24.04; Verilator 5.048; RISC-V GCC 13.2.0-2024.04.12; RISC-V assembler 2.42; Python 3.12
 - Vivado: 2025.2 build 6299465; `xc7a35ticsg324-1L`; measured 2026-08-29
