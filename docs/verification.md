@@ -1,6 +1,6 @@
 # Verification plan
 
-What's tested, by what mechanism, and what's explicitly not tested yet.
+What is tested, by what mechanism, and what is not tested yet.
 
 <details>
 <summary>Machine-checked repository facts</summary>
@@ -38,76 +38,56 @@ Historical synthesis — the implementation table was measured for RTL e55cf4026
 The release gate runs 25 programs across 6 memory configurations and 3 predictor configurations. Pinned architecture signatures and complete Spike traces both pass 38/38; random Spike lockstep passes 200/200; functional coverage is 44/44 (100.0%).
 <!-- portfolio:summary:end -->
 
-## Directed tests (`tests/`, run via `make all`)
+## Directed tests (`tests/`, via `make all`)
 
-25 hand-assembled programs cover instruction classes, true and false load-use dependencies, control flow, precise illegal/misaligned traps, CSR permissions, timer/software interrupt state, MRET, cache eviction, RAS/gshare behavior, and FENCE.I. Each checks final register state and optional stall counts against a `.ref` file across the 6-configuration directed matrix; cache configuration is not architecturally visible.
+25 hand-assembled programs covering instruction classes, true and false load-use dependencies, control flow, precise illegal/misaligned traps, CSR permissions, timer/software interrupt state, `MRET`, cache eviction, RAS/gshare behaviour and `FENCE.I`. Each checks final register state and optional stall counts against a `.ref` file across the 6-configuration matrix; cache geometry is not architecturally visible.
 
-Every test ends by storing to a reserved address (`tohost`, the riscv-tests convention); the run stops there and the stored value is the exit code. This replaced a `same_pc >= 6` heuristic that inferred completion from the PC not moving — which cannot distinguish "finished" from "spinning on a lock", "stalled on slow memory", or "stuck", and made every legitimately-looping test a guess. Completion is detected where the store *commits* rather than by watching memory, so it behaves identically with a write-back cache holding the value dirty.
+Every test ends by storing to `tohost`, and that value is the exit code. This replaced a `same_pc >= 6` heuristic that could not tell "finished" from "spinning" or "stalled". Completion is detected where the store *commits*, so a write-back cache holding the value dirty behaves identically. Tests name their handler via `la` rather than a hardcoded offset — adding the `tohost` sequence shifted every label and broke eight tests that computed `mtvec` by counting instructions.
 
-Tests name their trap handler via a `la` pseudo-instruction rather than a hardcoded byte offset. That is not cosmetic: adding the `tohost` sequence shifted every handler label and broke eight tests at once, because they computed `mtvec` by counting instructions.
+Catches decode/execute bugs, the targeted hazard, and trap entry/exit. Misses anything unwritten, and cannot tell a right answer from a right answer reached the wrong way — which is what lockstep is for.
 
-**Catches:** decode/execute bugs, the specific hazard each test targets, trap entry/exit.
-**Doesn't catch:** anything the author didn't think to write. Final-state comparison also can't distinguish "right answer via the wrong path" from "right answer" — which is what lockstep below is for.
+## SoC units and firmware (`make soc-check`)
 
-## SoC units and firmware integration (`make soc-check`)
+`core_external` and `csr_external_irq` isolate the external core boundary and machine-external interrupt. The bus path is covered by `wb_master_adapter`, `wb_arbiter`, `wb_interconnect` and `wb_memory`; peripherals and board control by `uart_tx`, `wb_uart`, `button_debounce`, `wb_gpio_irq` and `reset_controller`; `soc_smoke` proves the integrated hierarchy fetches and retires without a bus fault. Each unit is bounded by a timeout and covers success plus the delayed/error/permission/bounce cases relevant to it.
 
-The external core boundary and machine-external interrupt are isolated by `core_external` and `csr_external_irq`. The Wishbone path is checked by `wb_master_adapter`, `wb_arbiter`, `wb_interconnect`, and `wb_memory`. Peripheral and board-control behavior is checked by `uart_tx`, `wb_uart`, `button_debounce`, `wb_gpio_irq`, and `reset_controller`; `soc_smoke` proves that the integrated hierarchy fetches and retires without a bus fault. Each unit has a bounded timeout and covers successful transactions plus delayed/error/permission/bounce cases relevant to that block.
+The firmware harness uses the exact ELF-derived images and requires the complete stream `rv32i soc ready\nexternal irq\nexternal irq\n`, not a prefix. It rejects a bouncing BTN1 waveform, then requires two debounced presses, exactly two LED transitions, continued progress after each `MRET`, no duplicate interrupt, no UART framing error, no Wishbone error, and completion before its deadline. `make soc-check` also validates the image manifest, lints `rv32i_soc` and `arty_a7_35t_top`, and runs the guarded board-flow contracts in CI. Vivado routing and physical programming remain local steps.
 
-The firmware-level Verilator harness uses the exact ELF-derived instruction and data images. It requires the complete stream `rv32i soc ready\nexternal irq\nexternal irq\n`, not a matching prefix. It rejects a bouncing BTN1 waveform, then requires two distinct debounced presses, exactly two LED transitions, continued retirement/progress after each `MRET`, no duplicate interrupt, no UART framing error, no Wishbone error, and completion before its deadline.
+## Compliance (`compliance/`)
 
-`make soc-check` also validates the ELF/image manifest, lints `rv32i_soc` and `arty_a7_35t_top`, and runs guarded board-flow contracts. GitHub Actions runs this profile for changes to RTL, simulation, firmware, board constraints, SoC synthesis tools, build definitions, and the workflow itself. Vivado routing and physical programming remain local evidence steps.
-
-## Compliance suite (`compliance/`)
-
-The pinned `riscv-arch-test` `rv32i_m/I` suite contains 38 independently-written programs, each dumping a signature diffed word-for-word against a golden reference. It runs in a dedicated workflow for relevant pushes and pull requests; it is not multiplied across the six directed configurations.
-
-**Catches:** ISA-conformance bugs the directed suite's author (same person as the RTL author) wouldn't target.
-**Doesn't catch:** anything outside base RV32I, and it is still a final-state comparison.
+The pinned `riscv-arch-test` `rv32i_m/I` suite: 38 independently written programs, each dumping a signature diffed word-for-word against a golden reference, in its own workflow rather than multiplied across the directed matrix. Catches conformance bugs the directed suite's author — the same person who wrote the RTL — would not target. Still a final-state comparison, and only base RV32I.
 
 ## Spike lockstep (`make lockstep`)
 
-The same 38 compliance programs, re-linked for Spike's memory map and compared **retirement by retirement** — PC, instruction word, destination register, and written value. **38/38 match instruction-for-instruction** (`add-01` alone is 3,212 retirements).
+The same 38 programs re-linked for Spike's memory map and compared **retirement by retirement**: PC, instruction word, destination register, written value. **38/38 match instruction-for-instruction** (`add-01` alone is 3,212 retirements).
 
-The RTL exposes an RVFI-style trace at WB (`rvfi_*` in `backend.sv`), simulation-only, so no pipeline register is widened to serve a debug consumer. `tools/lockstep.py` streams Spike's commit log and stops at the *first* divergence, printing both sides and the preceding retirements — a mismatch reported 400 instructions later is nearly useless.
+The RTL exposes a simulation-only RVFI-style trace at WB (`rvfi_*` in `backend.sv`), so no pipeline register is widened for a debug consumer. `tools/lockstep.py` stops at the *first* divergence and prints both sides — a mismatch reported 400 instructions later is nearly useless. Both machines run the same ELF: Spike reserves low memory, so `spike-lockstep.ld` relocates to `0x80000000` and the RTL's memories alias it back.
 
-Both machines run the *same ELF*. Spike reserves low memory, so `compliance/link/spike-lockstep.ld` relocates to `0x80000000`; the RTL's memories decode only their low address bits, so that image aliases back to the same words, and only the reset vector needs adjusting (`RESET_PC`).
+Spike is pinned to the exact commit these results were measured against, not tracked from `master`: a reference model that shifts underneath you makes every divergence ambiguous between "the RTL regressed" and "upstream changed".
 
-Spike itself is pinned in CI to the exact commit these results were measured against, not tracked from `master`. A reference model that changes version underneath you makes every future divergence ambiguous between "the RTL regressed" and "upstream changed" — which is the single question this flow exists to answer unambiguously.
-
-**Catches:** the "right answer via the wrong path" class — wrong forwarding masked by a dead value, a flush that squashes one instruction too many, or a stale CSR read nobody observes.
-**Doesn't catch:** anything outside these 38 programs — though the same harness is now also driven by random stimulus, see below.
+Catches the wrong-path class — forwarding masked by a dead value, a flush that squashes one instruction too many, a stale CSR read nobody observes.
 
 ## SVA assertions
 
-The frozen evidence record reports the legacy core's concurrent and immediate properties. They sit beside the logic they constrain: next-PC priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall boundedness, and hazard soundness/completeness in `hazard_detect.sv`.
+Properties sit beside the logic they constrain: next-PC priority in `frontend.sv`, forwarding/trap/interrupt invariants in `backend.sv`, `x0` immutability in `reg_file.sv`, stall boundedness, and hazard soundness in `hazard_detect.sv`. The SoC adds `MEIP` reflection and gating, Wishbone ownership/response/stability, uncached MMIO counting, sticky bus faults, reset release, and GPIO/UART exclusivity. Counts are derived from source, not hand-maintained.
 
-The current tree adds properties for `MEIP` reflection and gating, Wishbone ownership/response/stability, uncached MMIO counting, sticky bus faults, reset release, and GPIO/UART exclusivity. Source counts are derived rather than hand-maintained and will replace the historical figures only when a complete current verification record is published.
+The interrupt properties are the sharpest: an interrupt resumes at the retired instruction's successor while a trap re-runs the faulting instruction, so `a_irq_mepc_is_next` and `a_trap_mepc_is_faulting` pin both directions — reversing them silently drops or repeats work. Three properties were found mis-specified during authoring and corrected against the RTL's actual behaviour, not the reverse.
 
-The interrupt properties are the sharpest: an interrupt resumes at the retired instruction's architectural successor while a trap re-runs the faulting instruction, so `a_irq_mepc_is_next` and `a_trap_mepc_is_faulting` pin down both directions — getting them backwards silently drops or repeats work.
+## Functional coverage (`make coverage`)
 
-**Catches:** any change violating an invariant, immediately, in any test.
-**Doesn't catch:** anything not expressed as a property. Three were found mis-specified during authoring (not RTL bugs) and corrected against the RTL's actual behaviour, not the reverse.
-
-## Functional coverage (`make coverage`, `docs/coverage.md`)
-
-Verilator doesn't support covergroups; `cover property` is the supported equivalent. The RTL contains 44 points across forwarding crosses, predictor outcomes, control-flow types, trap causes, and the D-cache FSM. The current report hits **44/44 (100%)**.
-
-The coverage target runs the 25 directed programs plus one deterministic BTB-alias fixture.
+Verilator has no covergroups, so `cover property` is the equivalent. 44 points across forwarding crosses, predictor outcomes, control-flow types, trap causes and the D-cache FSM, hit **44/44 (100%)** by the 25 directed programs plus one deterministic BTB-alias fixture. Full report in [`coverage.md`](coverage.md).
 
 ## Constrained-random, two flows
 
-**`make soak`** — `tools/rand_gen.py` emits random ALU/load-store programs; `tools/rv32i_model.py` is a small Python reference model that computes the expected result. **1000 seeds pass clean** against both cacheless and cache-enabled builds. Compares final register state.
+**`make soak`** — `tools/rand_gen.py` emits random ALU/load-store programs and `tools/rv32i_model.py` computes the expected result. **1000 seeds pass clean** on cacheless and cache-enabled builds, comparing final register state.
 
-**`make soak-lockstep`** — the same generator pointed at Spike instead (`--spike` mode, `tools/soak_lockstep.sh`). Because Spike is a full ISA implementation rather than a 90-line model, this flow *can* generate branches and jumps — ~13% of emitted instructions — and it compares **per retirement** rather than on final state. **200 seeds × 60 instructions pass clean, in ~20 seconds**, and it runs in CI on every `rtl/**` push alongside the compliance lockstep. Control flow under random stimulus was the single largest hole in this project's verification and this is what closes it.
+**`make soak-lockstep`** — the same generator pointed at Spike. Because Spike is a full ISA implementation rather than a 90-line model, this flow generates branches and jumps (~13% of emitted instructions) and compares **per retirement**. **200 seeds × 60 instructions pass clean in ~20 seconds**, in CI on every `rtl/**` push. Control flow under random stimulus was the largest hole in this project's verification.
 
-The harness was validated by fault injection rather than assumed to work: changing `BLTU` in `branch_unit.sv` to compare signed instead of unsigned made **4 of 20 seeds diverge**, each pointing at the retirement where the wrong branch direction first showed up. A verification flow that has only ever reported success hasn't been shown to be capable of reporting anything else.
+The harness was validated by fault injection rather than assumed to work: changing `BLTU` in `branch_unit.sv` to compare signed made **4 of 20 seeds diverge**, each pointing at the first wrong retirement. A flow that has only ever reported success has not been shown capable of reporting anything else.
 
-Getting it working surfaced a non-obvious hazard worth recording: the two machines do not start from the same architectural state. Spike enters through a boot ROM at `0x1000` that leaves residue in `x5`/`a0`/`a1` before jumping to the program, while the RTL comes out of reset all-zero. Hand-written compliance tests never notice because they initialise their own registers; randomly generated code reads whatever is there and diverges for a reason that has nothing to do with the DUT. The generator now emits an explicit register-init prologue. The first divergence this flow ever reported was that, not an RTL bug — which is itself the point: a lockstep harness that has never reported a divergence hasn't been shown to be able to.
-
-**Still doesn't catch:** traps, interrupts, or CSR sequences under random stimulus — generating those meaningfully requires the generator to model privilege state, not just emit instructions. Those remain directed-test and compliance-suite territory.
+One non-obvious hazard: the machines do not start from the same architectural state. Spike enters through a boot ROM at `0x1000` leaving residue in `x5`/`a0`/`a1`; the RTL comes out of reset all-zero. Hand-written tests never notice because they initialise their own registers; random code reads whatever is there. The generator now emits a register-init prologue — and that, not an RTL bug, was the first divergence this flow reported.
 
 ## Not yet done
 
-- **Trap/CSR/interrupt generation under random stimulus.** Control flow is covered now (`make soak-lockstep`); privileged sequences are not, and need the generator to model privilege state rather than just emit instructions.
-- **Formal.** The RVFI port makes a formal flow (e.g. riscv-formal) bindable, but none is set up.
-- **Physical-board validation.** The SoC passes simulation and flow contracts, but no validated route/program/manual-board result is published yet; see `docs/soc.md`.
+- **Traps, interrupts and CSR sequences under random stimulus** — needs the generator to model privilege state, not just emit instructions. Directed and compliance territory for now.
+- **Formal.** The RVFI port makes a flow such as riscv-formal bindable, but none is set up.
+- **Physical-board validation.** Simulation and flow contracts pass; no validated route/program/manual result is published. See [`soc.md`](soc.md).

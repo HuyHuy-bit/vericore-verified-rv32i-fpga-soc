@@ -7,34 +7,11 @@ A synthesis-tested 5-stage RISC-V core with caches, precise traps, and retiremen
 [![Spike Lockstep](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/lockstep.yml/badge.svg)](https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc/actions/workflows/lockstep.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This repository implements `RV32I_Zicsr_Zifencei` in SystemVerilog with forwarding, branch prediction, M-mode traps and interrupts, and parameterized instruction/data caches. Verification combines directed tests, exhaustive decode and hazard units, pinned RISC-V architecture tests, and instruction-by-instruction Spike comparison. Results are generated from machine-readable records and bound to exact tool and source revisions.
+**38/38 architecture tests and 200/200 random programs match Spike instruction-for-instruction at retirement.**
 
-<details>
-<summary>Machine-checked repository facts</summary>
+`RV32I_Zicsr_Zifencei` in SystemVerilog: forwarding, branch prediction, M-mode traps and interrupts, parameterized I/D caches. Every number below is generated from committed records bound to exact tool and source revisions.
 
-<!-- portfolio:facts:start -->
-<!-- evidence-facts:begin -->
-EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
-EVIDENCE_FACT DIRECTED_TESTS=25
-EVIDENCE_FACT ASSERTIONS_TOTAL=66
-EVIDENCE_FACT ASSERTIONS_CONCURRENT=63
-EVIDENCE_FACT ASSERTIONS_IMMEDIATE=3
-EVIDENCE_FACT SOURCE_COVER_POINTS=44
-EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
-EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
-EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
-EVIDENCE_FACT EVIDENCE_STATUS=current
-EVIDENCE_FACT SYNTHESIS_STATUS=historical
-EVIDENCE_FACT CI_CONFIGS=6
-EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
-EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
-EVIDENCE_FACT ARCH_TEST_EXPECTED=38
-EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
-EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
-<!-- evidence-facts:end -->
-<!-- portfolio:facts:end -->
-
-</details>
+![Five-stage datapath with forwarding, prediction, caches, and commit control](docs/images/datapath.svg)
 
 <!-- portfolio:status:start -->
 Current measurements — validated for the checked-out RTL.
@@ -44,8 +21,6 @@ Historical synthesis — the implementation table was measured for RTL e55cf4026
 <!-- portfolio:soc:start -->
 Physical-board evidence: not published
 <!-- portfolio:soc:end -->
-
-## Portfolio snapshot
 
 <!-- portfolio:snapshot:start -->
 > **Portfolio Snapshot** — 5-stage `RV32I_Zicsr_Zifencei` • 25 directed tests × 6 memory configurations • 3 predictor configurations • 38/38 architecture signatures • 38/38 Spike lockstep • 200/200 random Spike seeds • 66 assertions • 44/44 functional cover points • 70.6–76.3 MHz routed Artix-7 implementations
@@ -66,97 +41,57 @@ Physical-board evidence: not published
 | Functional cover points | 44/44 | `make coverage` |
 <!-- portfolio:verification:end -->
 
-![Five-stage datapath with forwarding, prediction, caches, and commit control](docs/images/datapath.svg)
-
-The redirect priority is `freeze > trap > mispredict > load-use stall > predict > PC+4`. Pipeline validity is carried from fetch through commit so flushed instructions cannot update architectural state, counters, or traces.
+Redirect priority is `freeze > trap > mispredict > load-use stall > predict > PC+4`. Validity is carried from fetch to commit, so flushed instructions cannot touch architectural state, counters, or traces.
 
 ## Core design
 
-**Pipeline and control**
-
-- 5-stage, single-issue, in-order pipeline: IF, ID, EX, MEM, WB.
-- EX/MEM and MEM/WB forwarding with operand-aware load-use stalls.
-- 64-entry BTB with 2-bit counters, optional gshare direction history, and an 8-entry return-address stack.
-- Branches resolve in EX; traps and interrupts redirect at one precise commit point.
-
-**ISA and privilege**
-
-- RV32I integer instructions plus `Zicsr` and `Zifencei`.
-- Machine CSRs, `ECALL`, `EBREAK`, `MRET`, `mcycle`, and `minstret`.
-- Precise illegal-instruction and misaligned fetch/load/store exceptions with `mepc`, `mcause`, and `mtval`.
-- Machine timer and software interrupts with the MIE/MPIE/MPP state stack.
-
-**Memory hierarchy**
-
-- Parameterized I-cache and D-cache capacity, block size, and associativity.
-- Write-through/no-allocate and write-back/write-allocate D-cache policies.
-- Configurable backing-memory latency and Block-RAM-oriented cache arrays.
-- `FENCE.I` invalidates the I-cache and restarts fetch; `FENCE` is a no-op for this single-hart, in-order design.
+- 5-stage, single-issue, in-order, with EX/MEM and MEM/WB forwarding and operand-aware load-use stalls.
+- 64-entry BTB with 2-bit counters, optional gshare, 8-entry return-address stack. Branches resolve in EX; traps redirect at one commit point.
+- Machine CSRs, `ECALL`, `EBREAK`, `MRET`, `mcycle`, `minstret`, and precise illegal-instruction and misaligned exceptions with `mepc`, `mcause`, `mtval`.
+- Parameterized cache capacity, block size and associativity, write-through and write-back policies. `FENCE.I` invalidates the I-cache and restarts fetch.
 
 ## Board-ready SoC
 
-The external-memory form of the core is integrated with a fair Wishbone fabric, separate 32 KiB instruction/data BRAMs, a transmit-only UART, four LEDs, and a debounced machine-external interrupt input for the Arty A7-35T. The firmware-level simulator verifies the complete boot message, button bounce rejection, two interrupt responses, LED changes, and continued execution after `MRET`. Physical-board evidence remains unpublished until the guarded Vivado and manual-board procedure produces a validated result record.
+The external-memory core sits behind a Wishbone fabric with 32 KiB instruction/data BRAMs, a transmit-only UART, four LEDs and a debounced interrupt input for the Arty A7-35T. The firmware simulator verifies the boot message, bounce rejection, two interrupt responses, LED changes and execution after `MRET`.
 
 ![Native Vivado implemented-device view of the routed SoC](docs/images/soc-vivado-device.png)
 
-This is the native Vivado 2025.2 Device window opened from the routed `xc7a35ticsg324-1L` checkpoint, with hierarchy color overlays for the core, D-cache, and BRAMs. It shows the FPGA implementation and SoC/core hierarchy, not a fabricated CPU die or conceptual rendering. The matching post-route timing simulation completed the full boot banner with annotated routed delays; capture and simulation hashes are recorded in [soc-vivado-device.json](docs/images/soc-vivado-device.json). This is implementation evidence, not proof of operation on a physical board.
+The Vivado 2025.2 Device window from the routed `xc7a35ticsg324-1L` checkpoint, with hierarchy overlays. Hashes in [soc-vivado-device.json](docs/images/soc-vivado-device.json). Implementation evidence, not proof of operation on a physical board.
 
 ![Actual post-route physical placement](docs/images/soc-floorplan.svg)
 
-The annotated floorplan is generated from actual Vivado post-route primitive locations and RTL hierarchy; it is not a conceptual CPU illustration. Its source commit, RTL commit, tool build, timing result, placement hash, and hierarchy counts are recorded in [soc-floorplan.json](docs/images/soc-floorplan.json). Physical board operation remains a separate pending validation.
+Generated from actual Vivado post-route primitive locations and RTL hierarchy — not a conceptual CPU illustration. Provenance is in [soc-floorplan.json](docs/images/soc-floorplan.json).
 
 ```bash
 make soc-check
 make soc-bitstream
 ```
 
-See the [Board-ready SoC](docs/soc.md) guide for the memory map, bus contract, firmware, programming flow, and limitations.
+See the [Board-ready SoC](docs/soc.md) guide for the memory map, bus contract, firmware, and programming flow.
 
 ## Quick start
 
-Docker is the only host requirement for the pinned open-source verification path.
+Docker is the only host requirement.
 
 ```bash
 git clone https://github.com/HuyHuy-bit/vericore-verified-rv32i-fpga-soc.git
 cd vericore-verified-rv32i-fpga-soc
 make verify
-make portfolio-check
 ```
 
-`make verify` runs the complete open-source profile in the pinned container. For iteration inside the devcontainer or a matching native environment, use `make check` for units, harness negatives, lint, and evidence consistency.
+`make verify` runs the complete open-source profile in the pinned container; `make check` is the faster inner loop.
 
-## Repository map
+## Verification
 
-```text
-rtl/core/          pipeline, control, prediction, CSRs, and counters
-rtl/memory/        backing memories, timing model, LSU, I-cache, D-cache
-rtl/bus/           Wishbone request adapters and arbitration
-rtl/soc/           address decode, BRAM, UART, GPIO, reset, and SoC integration
-rtl/boards/        board-specific top modules
-sim/               Verilator harness and focused SystemVerilog units
-tests/             directed assembly programs and strict references
-compliance/        RISC-V architecture-test target and linker support
-bench/             host-checked C workloads and benchmark runner
-firmware/          freestanding SoC startup, demo, headers, and linker script
-boards/            pinned physical constraints
-verification/      deterministic functional-coverage programs
-synthesis/         Vivado wrapper, constraints, fixtures, and summaries
-tools/             assemblers, models, lockstep, evidence, and environment tools
-docs/              architecture, verification, evidence, diagrams, and media
-results/           compact validated benchmark, synthesis, and tool records
-```
+The simulator accepts only explicit completion modes and rejects malformed references, bad `tohost` values, timeouts, incomplete traces and stale outputs. Spike lockstep compares complete retirement streams; architecture signatures are an independent external source. See [verification.md](docs/verification.md).
 
-## Verification strategy
-
-The simulator accepts only explicit completion modes and rejects malformed references, unsuccessful `tohost` values, timeouts, incomplete traces, and stale outputs. Spike lockstep compares complete retirement streams through the terminal self-loop, while architecture signatures provide an independent externally generated test source. See [verification.md](docs/verification.md) for coverage boundaries and failure semantics.
-
-The animated artifact below is a terminal recording of the repository verification workflow; it is not FPGA board footage.
+A terminal recording of the verification workflow — not FPGA board footage:
 
 ![Portfolio verification demo](docs/media/portfolio-demo.gif)
 
-## Measured performance and implementation
+## Measured performance
 
-The tables below are generated from committed records. Benchmark entries are `cycles / CPI`; each workload also runs against a native host oracle. Synthesis used Vivado 2025.2, `xc7a35ticsg324-1L`, 512-word backing memories, and a deliberately aggressive 2 ns constraint. Negative WNS means the designs do not close at 500 MHz; the reported fmax is calculated from the routed critical path.
+Benchmarks are `cycles / CPI`. Synthesis used Vivado 2025.2 on `xc7a35ticsg324-1L` with a deliberately aggressive 2 ns constraint, so negative WNS is expected; fmax is derived from the routed critical path.
 
 <details>
 <summary>Benchmark matrix</summary>
@@ -187,19 +122,39 @@ The tables below are generated from committed records. Benchmark entries are `cy
 
 </details>
 
-Exact commands, tool versions, source identities, and synthesis report hashes are in the [evidence ledger](docs/evidence.md).
+## Design notes
 
-## Design notes and next steps
+- The pipeline freezes globally on a memory stall; a decoupled front end is the clearest remaining performance experiment.
+- Instruction memory is read-only, so self-modifying code is outside the contract.
+- One external interrupt source, no PLIC; M/A/C and S/U modes are out of scope.
+- Random lockstep covers control flow, not randomized traps or CSR transitions.
 
-- The pipeline freezes globally on a memory stall; a decoupled front end is the clearest architectural performance experiment.
-- The board system uses separate BRAM regions behind Wishbone; instruction memory is read-only, so self-modifying code remains outside the contract.
-- The SoC supports one machine-external interrupt source without a PLIC; M/A/C extensions and S/U privilege modes remain outside scope.
-- Random lockstep covers control flow but not randomized traps or CSR state transitions; those remain directed-test territory.
-
-The deeper rationale—including cache inference experiments, exception ordering, and measured trade-offs—is in [architecture.md](docs/architecture.md).
+Full rationale and measured trade-offs are in [architecture.md](docs/architecture.md).
 
 <details>
-<summary>Measurement provenance</summary>
+<summary>Machine-checked facts and provenance</summary>
+
+<!-- portfolio:facts:start -->
+<!-- evidence-facts:begin -->
+EVIDENCE_FACT ISA=RV32I_Zicsr_Zifencei
+EVIDENCE_FACT DIRECTED_TESTS=25
+EVIDENCE_FACT ASSERTIONS_TOTAL=66
+EVIDENCE_FACT ASSERTIONS_CONCURRENT=63
+EVIDENCE_FACT ASSERTIONS_IMMEDIATE=3
+EVIDENCE_FACT SOURCE_COVER_POINTS=44
+EVIDENCE_FACT TRACKED_COVERAGE_HIT=44
+EVIDENCE_FACT TRACKED_COVERAGE_TOTAL=44
+EVIDENCE_FACT TRACKED_COVERAGE_STATUS=current
+EVIDENCE_FACT EVIDENCE_STATUS=current
+EVIDENCE_FACT SYNTHESIS_STATUS=historical
+EVIDENCE_FACT CI_CONFIGS=6
+EVIDENCE_FACT CI_MATRIX=baseline,slow-mem,icache-only,wt,wb,assoc
+EVIDENCE_FACT ARCH_TEST_SHA=6f7f47bdc61c0c51c0cbf75789678a1235eeefc2
+EVIDENCE_FACT ARCH_TEST_EXPECTED=38
+EVIDENCE_FACT SPIKE_SHA=55b4658dbf574ba0b714083ec436ce2cb5be1998
+EVIDENCE_FACT SPIKE_RANDOM_SEEDS=200
+<!-- evidence-facts:end -->
+<!-- portfolio:facts:end -->
 
 <!-- portfolio:provenance:start -->
 - Measurement timestamp: `2026-09-20T18:35:53Z`
@@ -217,12 +172,7 @@ The deeper rationale—including cache inference experiments, exception ordering
 
 ## References
 
-- [Architecture and implementation notes](docs/architecture.md)
-- [Board-ready SoC](docs/soc.md)
-- [Verification plan](docs/verification.md)
-- [Evidence ledger](docs/evidence.md)
-- [Result file format](results/FORMAT.md)
-- [RISC-V unprivileged ISA specification](https://docs.riscv.org/reference/isa/unpriv/rv32.html)
-- [RISC-V machine-level ISA specification](https://docs.riscv.org/reference/isa/priv/machine.html)
+- [Architecture](docs/architecture.md) · [Board-ready SoC](docs/soc.md) · [Verification plan](docs/verification.md) · [Evidence ledger](docs/evidence.md) · [Result format](results/FORMAT.md)
+- [RISC-V unprivileged ISA](https://docs.riscv.org/reference/isa/unpriv/rv32.html) · [machine-level ISA](https://docs.riscv.org/reference/isa/priv/machine.html)
 
 Licensed under the [MIT License](LICENSE).
